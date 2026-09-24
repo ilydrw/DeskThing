@@ -23,6 +23,7 @@ import {
   CommonSetting
 } from '@deskthing/types'
 import { AppData, LegacyAppData } from '@shared/types'
+import { normalizePlatforms } from '@shared/utils/platformUtils'
 
 // Utils
 import Logger from '@server/utils/logger'
@@ -422,7 +423,7 @@ export const constructManifest = (manifestData?: Partial<AppManifest>): AppManif
     version: manifestData?.version || '0.0.0',
     description: manifestData?.description || 'No description available',
     author: manifestData?.author || 'Unknown Author',
-    platforms: manifestData?.platforms || Object.values(PlatformTypes),
+    platforms: normalizePlatforms(manifestData?.platforms) || Object.values(PlatformTypes),
     homepage: manifestData?.homepage || '',
     repository: manifestData?.repository || '',
     updateUrl: manifestData?.updateUrl || manifestData?.repository || '',

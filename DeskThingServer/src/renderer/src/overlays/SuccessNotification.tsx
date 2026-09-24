@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore, useClientStore } from '@renderer/stores'
 import { App, PlatformTypes } from '@deskthing/types'
 import { ProgressChannel, StagedAppManifest } from '@shared/types'
+import { normalizePlatforms } from '@shared/utils/platformUtils'
 import { LogEntry } from '@renderer/components/LogEntry'
 import { useChannelProgress } from '@renderer/hooks/useProgress'
 
@@ -49,7 +50,7 @@ const checkCompatibility = (
         ? PlatformTypes.MAC
         : PlatformTypes.LINUX
 
-  if (!manifest.platforms?.includes(currentPlatform)) {
+  if (!normalizePlatforms(manifest.platforms)?.includes(currentPlatform)) {
     compResult.isCompatible = false
     compResult.issues.push({
       title: 'Incompatible Platform',

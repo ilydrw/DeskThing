@@ -10,6 +10,7 @@ import {
 } from '@renderer/assets/icons'
 import { LogEntry } from '@renderer/components/LogEntry'
 import { ProgressChannel, StagedAppManifest } from '@shared/types'
+import { normalizePlatforms } from '@shared/utils/platformUtils'
 import { useChannelProgress } from '@renderer/hooks/useProgress'
 import { useAppStore, useClientStore, useReleaseStore } from '@renderer/stores'
 import { App, PlatformTypes } from '@deskthing/types'
@@ -53,7 +54,7 @@ const checkCompatibility = (
         ? PlatformTypes.MAC
         : PlatformTypes.LINUX
 
-  if (!manifest.platforms?.includes(currentPlatform)) {
+  if (!normalizePlatforms(manifest.platforms)?.includes(currentPlatform)) {
     compResult.isCompatible = false
     compResult.issues.push({
       title: 'Incompatible Platform',
