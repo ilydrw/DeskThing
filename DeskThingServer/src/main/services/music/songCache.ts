@@ -3,7 +3,13 @@ import { SongAbilities, SongData } from '@deskthing/types'
 import Logger from '@server/utils/logger'
 import { join } from 'path'
 import { app } from 'electron'
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+
+const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024
+const MAX_THUMBNAIL_CACHE_BYTES = 50 * 1024 * 1024
+const MAX_THUMBNAIL_CACHE_FILES = 100
 
 export enum SongCacheEvents {
   SONG_CHANGED = 'songChanged',
@@ -81,41 +87,91 @@ export class SongCache extends EventEmitter<SongCacheEventMap> {
     }
   }
 
-  private encodeSongThumbnail(thumbnail: string, song: SongData): string {
-    // Handle base64 encodings
-    if (thumbnail.startsWith('data:image/')) {
-      // For base64 data, store it in a temporary file and serve it through our own endpoint
-      const imageId = (song.id || `${song.track_name}-${song.artist}`).replace(/[<>:"/\\|?*]/g, '_')
-      const imageBuffer = Buffer.from(thumbnail.split(',')[1], 'base64')
+  private createThumbnailId(song: SongData): string {
+    const identity = song.id || `${song.track_name}-${song.artist}-${song.album || ''}`
+    return createHash('sha256').update(identity).digest('hex')
+  }
 
-      // Store in a dedicated thumbnails directory
-      const thumbnailsDir = join(app.getPath('userData'), 'thumbnails')
-      if (!existsSync(thumbnailsDir)) {
-        mkdirSync(thumbnailsDir, { recursive: true })
+  private pruneThumbnailCache(thumbnailsDir: string): void {
+    const files = readdirSync(thumbnailsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.jpg'))
+      .map((entry) => {
+        const filePath = join(thumbnailsDir, entry.name)
+        const fileStats = statSync(filePath)
+        return {
+          path: filePath,
+          size: fileStats.size,
+          modifiedAt: fileStats.mtimeMs
+        }
+      })
+      .sort((a, b) => b.modifiedAt - a.modifiedAt)
+
+    let retainedBytes = 0
+    let retainedFiles = 0
+    for (const file of files) {
+      const exceedsLimit =
+        retainedFiles >= MAX_THUMBNAIL_CACHE_FILES ||
+        retainedBytes + file.size > MAX_THUMBNAIL_CACHE_BYTES
+
+      if (exceedsLimit) {
+        unlinkSync(file.path)
+        continue
       }
 
-      const imagePath = join(thumbnailsDir, `${imageId}.jpg`)
-      writeFileSync(imagePath, imageBuffer)
+      retainedFiles += 1
+      retainedBytes += file.size
+    }
+  }
 
-      // Return a URL to our own endpoint
-      return `/resource/thumbnail/${imageId}`
+  private cacheThumbnailBuffer(imageBuffer: Buffer, song: SongData): string {
+    if (imageBuffer.length === 0 || imageBuffer.length > MAX_THUMBNAIL_BYTES) {
+      throw new Error(`Thumbnail must be between 1 byte and ${MAX_THUMBNAIL_BYTES} bytes`)
     }
 
-    // Handle local file paths
-    if (thumbnail.startsWith('file://')) {
-      const localPath = thumbnail.startsWith('file://') ? thumbnail.substring(7) : thumbnail
+    const thumbnailsDir = join(app.getPath('userData'), 'thumbnails')
+    mkdirSync(thumbnailsDir, { recursive: true })
 
-      // Create a symbolic link or copy to our resource directory
-      const imageId = (song.id || `${song.track_name}-${song.artist}`).replace(/[<>:"/\\|?*]/g, '_')
-      const thumbnailsDir = join(app.getPath('userData'), 'thumbnails')
-      if (!existsSync(thumbnailsDir)) {
-        mkdirSync(thumbnailsDir, { recursive: true })
+    const imageId = this.createThumbnailId(song)
+    writeFileSync(join(thumbnailsDir, `${imageId}.jpg`), imageBuffer)
+    this.pruneThumbnailCache(thumbnailsDir)
+
+    return `/resource/thumbnail/${imageId}`
+  }
+
+  private encodeSongThumbnail(thumbnail: string, song: SongData): string {
+    try {
+      if (thumbnail.startsWith('data:image/')) {
+        const base64Data = thumbnail.split(',', 2)[1]
+        if (!base64Data) throw new Error('Thumbnail data URI is malformed')
+
+        const maxEncodedLength = Math.ceil((MAX_THUMBNAIL_BYTES * 4) / 3) + 4
+        if (base64Data.length > maxEncodedLength) {
+          throw new Error(`Thumbnail data URI exceeds ${MAX_THUMBNAIL_BYTES} bytes`)
+        }
+
+        return this.cacheThumbnailBuffer(Buffer.from(base64Data, 'base64'), song)
       }
 
-      const destPath = join(thumbnailsDir, `${imageId}.jpg`)
-      copyFileSync(localPath, destPath)
+      if (thumbnail.startsWith('file://')) {
+        const localPath = fileURLToPath(thumbnail)
+        const sourceStats = statSync(localPath)
+        if (!sourceStats.isFile() || sourceStats.size > MAX_THUMBNAIL_BYTES) {
+          throw new Error(`Local thumbnail exceeds ${MAX_THUMBNAIL_BYTES} bytes`)
+        }
 
-      return `/resource/thumbnail/${imageId}`
+        const thumbnailsDir = join(app.getPath('userData'), 'thumbnails')
+        mkdirSync(thumbnailsDir, { recursive: true })
+        const imageId = this.createThumbnailId(song)
+        copyFileSync(localPath, join(thumbnailsDir, `${imageId}.jpg`))
+        this.pruneThumbnailCache(thumbnailsDir)
+        return `/resource/thumbnail/${imageId}`
+      }
+    } catch (error) {
+      Logger.warn(`Unable to cache song thumbnail: ${error}`, {
+        source: 'SongCache',
+        function: 'encodeSongThumbnail'
+      })
+      return ''
     }
 
     // Make URLs point to the proxy
@@ -198,7 +254,7 @@ export class SongCache extends EventEmitter<SongCacheEventMap> {
       this.currentSong.thumbnail = this.encodeSongThumbnail(song.thumbnail, song)
     }
 
-    this.emit(SongCacheEvents.SONG_CHANGED, song)
+    this.emit(SongCacheEvents.SONG_CHANGED, this.currentSong)
 
     // Clear existing timeouts if any
     if (this.songEndTimeout) {

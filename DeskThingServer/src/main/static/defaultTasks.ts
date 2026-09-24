@@ -57,10 +57,10 @@ export const ServerTasks: Record<string, Task> = {
       },
       setup: {
         id: 'setup',
-        type: STEP_TYPES.EXTERNAL,
-        label: 'Setup',
-        instructions: 'Go to the DeskThing youtube channel and follow a Step A video',
-        url: 'https://deskthing.app/youtube',
+        type: STEP_TYPES.SHORTCUT,
+        destination: 'clients/connections',
+        label: 'Open Device Setup',
+        instructions: 'Use the built-in device setup and recovery flow',
         completed: false
       },
       connect: {

@@ -6,11 +6,23 @@
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com http://localhost:* https://thingify.tools data: deskthing:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com http://localhost:* data: deskthing:;"
     />
   </head>
   <body style="overflow: hidden; background-color: black">
-    <div id="root"><div style="width: 100vw; height: 100vh; display:flex;align-items: center;justify-content: center;"><h1 style="color:white">Loading Deskthing...</h1></div></div>
+    <div id="root">
+      <div
+        style="
+          width: 100vw;
+          height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        "
+      >
+        <h1 style="color: white">Loading Deskthing...</h1>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

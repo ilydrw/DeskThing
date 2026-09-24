@@ -59,6 +59,12 @@ export class MusicService implements MusicStoreClass {
     // No-op as per interface
   }
 
+  dispose(): void {
+    if (this.refreshInterval) clearInterval(this.refreshInterval)
+    this.refreshInterval = null
+    this.songCache.clear()
+  }
+
   async updateRefreshInterval(refreshRate: number): Promise<void> {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval)
@@ -80,7 +86,9 @@ export class MusicService implements MusicStoreClass {
     }
 
     this.refreshInterval = setInterval(() => {
-      this.refreshMusicData()
+      void this.refreshMusicData().catch((error) => {
+        Logger.warn('Music refresh failed', { source: 'MusicService', error: error as Error })
+      })
     }, refreshRate)
   }
 
@@ -234,16 +242,20 @@ export class MusicService implements MusicStoreClass {
 
     // Listen for song end events
     this.songCache.on(SongCacheEvents.SONG_ENDED, () => {
-      this.refreshMusicData()
+      void this.refreshMusicData().catch((error) => {
+        Logger.error(`Failed to refresh music after the current song ended: ${error}`)
+      })
     })
 
     this.songCache.on(SongCacheEvents.SONG_CHANGED, (data) => {
-      this.refreshMusicData(data)
+      void this.refreshMusicData(data).catch((error) => {
+        Logger.error(`Failed to broadcast updated song data: ${error}`)
+      })
     })
   }
 
   private handleMusicPayload = async (songData: SongData): Promise<void> => {
-    this.initialize()
+    await this.initialize()
 
     try {
       let songDataWithColor: SongData = songData
@@ -257,22 +269,17 @@ export class MusicService implements MusicStoreClass {
         }
       }
 
-      // Update cache and broadcast to clients
+      // Updating the cache emits one normalized SONG_CHANGED event. That event
+      // is the single broadcast path, avoiding duplicate/base64-heavy payloads.
       this.songCache.updateSong(songDataWithColor)
-      const currentSong = this.songCache.getCurrentSong() // ensures the song is correctly filled with available data
+      const currentSong = this.songCache.getCurrentSong()
 
       if (!currentSong) {
         Logger.debug(`No song data available to broadcast`)
         return
       }
 
-      await this.platformStore.broadcastToClients({
-        type: DESKTHING_DEVICE.MUSIC,
-        app: 'client',
-        payload: currentSong
-      })
-
-      Logger.log(LOGGING_LEVELS.LOG, `Song data sent to clients`)
+      Logger.log(LOGGING_LEVELS.LOG, `Song data normalized and queued for clients`)
     } catch (error) {
       Logger.log(LOGGING_LEVELS.ERROR, `Failed to process song data: ${error}`)
     }

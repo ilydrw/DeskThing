@@ -33,10 +33,10 @@ export const FeedbackButton: FC<FeedbackButtonProps> = ({
     <Button
       title="Submit Feedback"
       onClick={handleOpenFeedback}
-      className={`gap-2 ${className || ' hover:bg-zinc-900'}`}
+      className={`gap-2 ${className || ''}`}
     >
       <IconFeedback />
-      {showText && <p className="flex-grow text-center text-lg md:block hidden">Feedback</p>}
+      {showText && <p className="flex-grow text-left text-sm md:block hidden">Feedback</p>}
     </Button>
   )
 }

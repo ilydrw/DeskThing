@@ -32,11 +32,11 @@ const ActionElement = ({
   }
 
   return (
-    <div className="flex gap-2 border-cyan-500 border rounded-md">
+    <div className="flex gap-2 border-emerald-600 border rounded-md">
       <Button
         disabled={!action.enabled}
         onClick={handleRunAction}
-        className="justify-center items-center hover:bg-cyan-500"
+        className="justify-center items-center hover:bg-emerald-600"
       >
         <ActionIcon action={action} className="stroke-2" />
         <p>{action.name || action.id}</p>

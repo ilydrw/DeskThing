@@ -45,7 +45,7 @@ const TaskComponent: FC<TaskComponentProps> = ({ task, onClose }) => {
         w-full
         rounded-lg
         border
-        ${task.id == currentTask?.id ? 'border-cyan-500' : 'border-neutral-800'}
+        ${task.id == currentTask?.id ? 'border-emerald-500' : 'border-neutral-800'}
         ${
           task.available
             ? task.completed
@@ -118,7 +118,7 @@ const TaskComponent: FC<TaskComponentProps> = ({ task, onClose }) => {
           ) : (
             <>
               <Button
-                className="bg-cyan-700 hover:bg-cyan-800 text-white px-2 py-1 rounded transition-colors text-xs"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white px-2 py-1 rounded transition-colors text-xs"
                 onClick={handleAccept}
                 title="Continue Task"
               >

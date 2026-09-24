@@ -128,11 +128,11 @@ const FeedbackOverlay: FC = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="text-sm text-zinc-400">Discord ID (optional)</label>
+          <label className="text-sm text-zinc-400">Contact handle (optional)</label>
           <input
             type="text"
             className="p-2 rounded bg-zinc-800 border border-zinc-700 text-white focus:outline-none focus:border-blue-500"
-            placeholder="Enter your Discord ID"
+            placeholder="Email, Discord, or GitHub handle"
             value={feedback.feedback?.discordId}
             onChange={(e) => handleChange('discordId', e.target.value)}
           />

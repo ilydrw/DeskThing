@@ -9,5 +9,5 @@ import { ipcMain } from 'electron'
 export async function setupIpcHandlers(): Promise<void> {
   // Initialize all IPC handlers
   const { initializeIpcHandlers } = await import('../services/ipc/initializer')
-  initializeIpcHandlers(ipcMain)
+  await initializeIpcHandlers(ipcMain)
 }

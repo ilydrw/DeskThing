@@ -30,7 +30,8 @@ export enum PlatformEvent {
   SERVER_STARTED = 'server_started',
   REFRESHED_CLIENTS = 'refreshed_clients',
   CLIENT_LIST = 'clients_list',
-  CLIENT_PONG = 'client_ping'
+  CLIENT_PONG = 'client_ping',
+  DATA_SENT = 'data_sent'
 }
 
 export type PlatformConnectionOptions<T extends Record<string, unknown> = Record<string, unknown>> =
@@ -64,6 +65,10 @@ export type PlatformPayloads =
   | {
       event: PlatformEvent.CLIENT_PONG
       data: { clientId: string; result: { server?: number; socket?: number } }
+    }
+  | {
+      event: PlatformEvent.DATA_SENT
+      data: { requestId: string; success: boolean }
     }
   | {
       event: PlatformEvent.DATA_RECEIVED

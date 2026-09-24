@@ -64,6 +64,10 @@ export class AppProcessStore
     return Object.keys(this.processes)
   }
 
+  async dispose(): Promise<void> {
+    await Promise.all(this.getActiveProcessIds().map((name) => this.terminateProcess(name)))
+  }
+
   private async getAppPath(appName: string): Promise<string> {
     const possiblePaths = [
       'index.js',
@@ -501,7 +505,7 @@ export class AppProcessStore
 
       try {
         // First try to gracefully terminate
-        this.processes[appName].process.terminate()
+          await this.processes[appName].process.terminate()
       } catch (terminateError) {
         Logger.error(`Error during termination of process ${appName}`, {
           source: 'AppProcessStore',

@@ -28,7 +28,7 @@ export function getMainWindow(): BrowserWindow | undefined {
 export function buildMainWindow(): BrowserWindow {
   // ensure the taskbar icon is showing on mac
   if (process.platform === 'darwin') {
-    app.dock.show()
+    void app.dock?.show()
   }
 
   if (mainWindow && !mainWindow.isDestroyed()) {

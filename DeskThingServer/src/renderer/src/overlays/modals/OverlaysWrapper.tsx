@@ -1,22 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import QROverlay from '@renderer/overlays/modals/QROverlay'
-import SettingsOverlay from '../settings/SettingsOverlay'
-import NotificationOverlay from '../notifications/NotificationOverlay'
-import AppsOverlay from '../apps/AppsOverlay'
-import AddProfileOverlay from './AddProfile.'
-import UpdateOverlay from '../UpdateOverlay'
 import useUpdateStore from '@renderer/stores/updateStore'
 import useTaskStore from '@renderer/stores/taskStore'
-import TaskOverlay from './TaskOverlay'
-import FeedbackOverlay from './FeedbackOverlay'
-import SetupOverlay from '../setup/SetupOverlay'
 import { useNotificationStore, useSettingsStore } from '@renderer/stores'
-import LinkRequestOverlay from './LinkRequestOverlay'
 import ProgressPopup from '../ProgressPopup'
-import ViewProgressLogs from './ViewProgressLogs'
-import AddReleaseModal from '../releases/AddReleaseOverlay'
-import AvailableNotificationOverlay from '../AvailableNotificationOverlay'
+
+const QROverlay = lazy(() => import('@renderer/overlays/modals/QROverlay'))
+const SettingsOverlay = lazy(() => import('../settings/SettingsOverlay'))
+const NotificationOverlay = lazy(() => import('../notifications/NotificationOverlay'))
+const AppsOverlay = lazy(() => import('../apps/AppsOverlay'))
+const AddProfileOverlay = lazy(() => import('./AddProfile.'))
+const UpdateOverlay = lazy(() => import('../UpdateOverlay'))
+const TaskOverlay = lazy(() => import('./TaskOverlay'))
+const FeedbackOverlay = lazy(() => import('./FeedbackOverlay'))
+const SetupOverlay = lazy(() => import('../setup/SetupOverlay'))
+const LinkRequestOverlay = lazy(() => import('./LinkRequestOverlay'))
+const ViewProgressLogs = lazy(() => import('./ViewProgressLogs'))
+const AddReleaseModal = lazy(() => import('../releases/AddReleaseOverlay'))
+const AvailableNotificationOverlay = lazy(() => import('../AvailableNotificationOverlay'))
 
 const overlays = {
   qr: QROverlay,
@@ -52,16 +53,36 @@ const OverlayWrapper: React.FC<React.PropsWithChildren> = ({
 
   return (
     <>
-      {activeRequests && activeRequests.length > 0 && <LinkRequestOverlay />}
-      {(update.updateAvailable || update.updateDownloaded) && <UpdateOverlay />}
-      {Object.keys(notifications).length > 0 && <AvailableNotificationOverlay />}
+      {activeRequests && activeRequests.length > 0 && (
+        <Suspense fallback={null}>
+          <LinkRequestOverlay />
+        </Suspense>
+      )}
+      {(update.updateAvailable || update.updateDownloaded) && (
+        <Suspense fallback={null}>
+          <UpdateOverlay />
+        </Suspense>
+      )}
+      {Object.keys(notifications).length > 0 && (
+        <Suspense fallback={null}>
+          <AvailableNotificationOverlay />
+        </Suspense>
+      )}
       {activeOverlays.map((key) => {
-        const OverlayComponent = overlays[key]
-        return <OverlayComponent key={key} />
+        const OverlayComponent = overlays[key as keyof typeof overlays]
+        return (
+          <Suspense fallback={null} key={key}>
+            <OverlayComponent />
+          </Suspense>
+        )
       })}
       <ProgressPopup />
       {memoizedChildren}
-      {currentTask && <TaskOverlay />}
+      {currentTask && (
+        <Suspense fallback={null}>
+          <TaskOverlay />
+        </Suspense>
+      )}
     </>
   )
 }

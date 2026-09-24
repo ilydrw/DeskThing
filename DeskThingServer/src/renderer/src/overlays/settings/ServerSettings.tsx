@@ -307,11 +307,11 @@ const ServerSettings: React.FC = () => {
       <div className="flex flex-col">
         <div className="w-full px-4 flex justify-between items-center">
           <div className="flex gap-1 items-center">
-            <h2 className="text-xl">Collect Anonymous Statistics</h2>
-            <InfoComponent description="Help us improve DeskThing by sending anonymous usage statistics." />
+            <h2 className="text-xl">Share Usage Diagnostics</h2>
+            <InfoComponent description="Optional. Sends version, platform, connection, app lifecycle, and resource-usage diagnostics only when enabled and a service is configured." />
           </div>
           <Button
-            title="Help us improve DeskThing by sending anonymous usage statistics"
+            title="Share optional usage diagnostics"
             className="bg-transparent p-0"
             onClick={() => handleSettingChange('flag_collectStats', !settings.flag_collectStats)}
           >
@@ -322,27 +322,13 @@ const ServerSettings: React.FC = () => {
             />
           </Button>
         </div>
-        {!settings.flag_collectStats && (
-          <div className="animate-fade-in-down px-4 py-2">
-            <p className="text-gray-400">
-              Hey there! Riprod here. As of v0.11.11, I&apos;ve added anonymous statistics
-              collection to help me understand how many people are using DeskThing.
-            </p>
-            <p className="text-gray-400">
-              My goal is to keep DeskThing completely free forever. These stats really help when
-              talking to potential investors, which could help secure funding to keep the project
-              going strong. It also helps keep me motivated knowing people are still using it!
-            </p>
-            <p className="text-gray-400">
-              Of course, it&apos;s totally up to you whether to enable this or not - but it would
-              mean a lot if you did!
-            </p>
-            <p className="text-gray-400">
-              Thanks for being awesome! Hope you&apos;re enjoying DeskThing as much as I love
-              working on it 🍞
-            </p>
-          </div>
-        )}
+        <div className="animate-fade-in-down px-4 py-2">
+          <p className="text-gray-400">
+            {settings.flag_collectStats
+              ? 'Diagnostics are enabled. Turning this off immediately discards queued statistics and stops device registration and monitoring.'
+              : 'Diagnostics are off. DeskThing does not register this device, monitor usage, or queue statistics unless you explicitly enable this setting.'}
+          </p>
+        </div>
       </div>
       <div className="border-t py-5 border-gray-900 w-full flex justify-end">
         <Button

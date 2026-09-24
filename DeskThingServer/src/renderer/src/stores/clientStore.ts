@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import { ClientDownloadReturnData, IpcRendererCallback, LoggingData } from '@shared/types'
-import { ClientManifest, Client, PlatformIDs } from '@deskthing/types'
+import {
+  ClientDownloadReturnData,
+  IpcRendererCallback,
+  KnownDevice,
+  LoggingData
+} from '@shared/types'
+import { ClientManifest, Client, PlatformIDs, ConnectionState } from '@deskthing/types'
 import useNotificationStore from './notificationStore'
 
 interface ClientStoreState {
@@ -8,6 +13,7 @@ interface ClientStoreState {
   clients: Client[]
   logging: LoggingData | null
   clientManifest: ClientManifest | null
+  knownDevices: KnownDevice[]
   initialized: boolean
 
   // Actions
@@ -23,6 +29,51 @@ interface ClientStoreState {
   loadClientUrl: (url: string) => Promise<ClientDownloadReturnData>
   loadClientZip: (zip: string) => Promise<ClientDownloadReturnData>
   updateClientManifest: (client: Partial<ClientManifest>) => void
+  renameDevice: (clientId: string, displayName?: string) => Promise<KnownDevice | undefined>
+  forgetDevice: (clientId: string) => Promise<boolean>
+}
+
+// ADB discovery also returns devices whose display client has not connected yet.
+const countConnectedClients = (clients: Client[]): number =>
+  clients.filter(
+    (client) => client.connected && client.connectionState === ConnectionState.Connected
+  ).length
+
+export const findKnownDeviceForClient = (
+  client: Client,
+  knownDevices: KnownDevice[]
+): KnownDevice | undefined => {
+  const identifiers = new Set<string>([
+    client.clientId,
+    ...Object.values(client.identifiers ?? {}).map((identifier) => identifier.id)
+  ])
+  const usid = client.meta?.[PlatformIDs.ADB]?.usid
+  if (usid) identifiers.add(usid)
+
+  return knownDevices.find(
+    (device) =>
+      identifiers.has(device.id) ||
+      Object.values(device.identifiers).some(
+        (identifier) => Boolean(identifier) && identifiers.has(identifier)
+      )
+  )
+}
+
+const clientsShareIdentity = (left: Client, right: Client): boolean => {
+  const leftIdentifiers = new Set([
+    left.clientId,
+    ...Object.values(left.identifiers ?? {}).map((identifier) => identifier.id),
+    left.meta?.[PlatformIDs.ADB]?.usid
+  ])
+  const rightIdentifiers = [
+    right.clientId,
+    ...Object.values(right.identifiers ?? {}).map((identifier) => identifier.id),
+    right.meta?.[PlatformIDs.ADB]?.usid
+  ]
+
+  return rightIdentifiers.some(
+    (identifier) => Boolean(identifier) && leftIdentifiers.has(identifier)
+  )
 }
 
 // Create Zustand store
@@ -31,6 +82,7 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
   clients: [],
   logging: null,
   clientManifest: null,
+  knownDevices: [],
   initialized: false,
 
   initialize: async () => {
@@ -39,7 +91,7 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
     const handleClientData: IpcRendererCallback<'clients'> = (_event, data) => {
       set(() => ({
         clients: data,
-        connections: data?.length || 0
+        connections: countConnectedClients(data)
       }))
     }
 
@@ -47,49 +99,54 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
       switch (data.request) {
         case 'added': {
           set((state) => {
-            const existingClientIndex = state.clients.findIndex(
-              (client) => client.clientId === data.client.clientId
+            const existingClientIndex = state.clients.findIndex((client) =>
+              clientsShareIdentity(client, data.client)
             )
 
             if (existingClientIndex !== -1) {
-              state.clients[existingClientIndex] = data.client
+              const clients = state.clients.map((client, index) =>
+                index === existingClientIndex ? data.client : client
+              )
               return {
-                clients: state.clients,
-                connections: state.connections
+                clients,
+                connections: countConnectedClients(clients)
               }
             }
 
+            const clients = [...state.clients, data.client]
             return {
-              clients: [...state.clients, data.client],
-              connections: state.connections
+              clients,
+              connections: countConnectedClients(clients)
             }
           })
           break
         }
         case 'removed': {
-          set((state) => ({
-            clients: state.clients.filter((client) => client.clientId !== data.clientId),
-            connections: state.connections
-          }))
+          set((state) => {
+            const clients = state.clients.filter((client) => client.clientId !== data.clientId)
+            return { clients, connections: countConnectedClients(clients) }
+          })
           break
         }
         case 'modified': {
           set((state) => {
-            const existingClientIndex = state.clients.findIndex(
-              (client) => client.clientId === data.client.clientId
+            const existingClientIndex = state.clients.findIndex((client) =>
+              clientsShareIdentity(client, data.client)
             )
             if (existingClientIndex === -1) {
+              const clients = [...state.clients, data.client]
               return {
-                clients: [...state.clients, data.client]
+                clients,
+                connections: countConnectedClients(clients)
               }
             }
 
-            state.clients[existingClientIndex] = data.client
-
+            const clients = state.clients.map((client, index) =>
+              index === existingClientIndex ? data.client : client
+            )
             return {
-              clients: state.clients.map((client) =>
-                client.clientId === data.client.clientId ? data.client : client
-              )
+              clients,
+              connections: countConnectedClients(clients)
             }
           })
           break
@@ -97,19 +154,27 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
         case 'list': {
           set({
             clients: data.clients,
-            connections: data.clients?.length || 0
+            connections: countConnectedClients(data.clients)
           })
           break
         }
       }
     }
 
+    const handleKnownDevices: IpcRendererCallback<'known-devices'> = (_event, devices) => {
+      set({ knownDevices: devices })
+    }
+
     window.electron.ipcRenderer.on('clients', handleClientData)
     window.electron.ipcRenderer.on('platform:client', handleNewClient)
+    window.electron.ipcRenderer.on('known-devices', handleKnownDevices)
 
-    const clientManifest = await window.electron.client.getClientManifest()
+    const [clientManifest, knownDevices] = await Promise.all([
+      window.electron.client.getClientManifest(),
+      window.electron.client.getKnownDevices()
+    ])
 
-    set({ initialized: true, clientManifest: clientManifest })
+    set({ initialized: true, clientManifest, knownDevices })
   },
 
   downloadLatestClient: async (): Promise<void> => {
@@ -160,6 +225,32 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
     window.electron.client.updateClientManifest(client)
   },
 
+  renameDevice: async (
+    clientId: string,
+    displayName?: string
+  ): Promise<KnownDevice | undefined> => {
+    const renamed = await window.electron.client.renameDevice(clientId, displayName)
+    if (!renamed) return
+
+    set((state) => ({
+      knownDevices: [renamed, ...state.knownDevices.filter((device) => device.id !== renamed.id)]
+    }))
+    return renamed
+  },
+
+  forgetDevice: async (clientId: string): Promise<boolean> => {
+    const currentDevice = get().knownDevices.find(
+      (device) => device.id === clientId || Object.values(device.identifiers).includes(clientId)
+    )
+    const forgotten = await window.electron.client.forgetDevice(clientId)
+    if (forgotten && currentDevice) {
+      set((state) => ({
+        knownDevices: state.knownDevices.filter((device) => device.id !== currentDevice.id)
+      }))
+    }
+    return forgotten
+  },
+
   requestADBDevices: async (): Promise<Client[] | undefined> => {
     try {
       const devices = await window.electron.platform.send({
@@ -181,7 +272,7 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
       const connections = await window.electron.utility.getConnections()
       console.debug('Got the connections', connections)
       set({
-        connections: connections?.length || 0,
+        connections: countConnectedClients(connections),
         clients: connections
       })
     } catch (error) {
@@ -196,7 +287,7 @@ const useClientStore = create<ClientStoreState>((set, get) => ({
       if (!clients) return false
       set(() => ({
         clients: clients,
-        connections: clients?.length || 0
+        connections: countConnectedClients(clients)
       }))
       return true
     } catch (error) {

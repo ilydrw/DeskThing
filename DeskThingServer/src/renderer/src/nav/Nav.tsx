@@ -18,16 +18,16 @@ const Nav: React.FC = () => {
   }
 
   return (
-    <nav className=" text-neutral-200 hover:text-white w-full">
-      <ul className="flex justify-around">
+    <nav className="nav-shell text-neutral-200 w-full" aria-label="Primary navigation">
+      <ul className={`grid ${is_nerd ? 'grid-cols-5' : 'grid-cols-4'} gap-1`}>
         <li className="w-full h-full group">
           <NavButton
             location="Dashboard"
             currentPage={currentPage}
             handleNavigation={handleNavigation}
           >
-            <IconHome iconSize={30} />
-            <span className="hidden lg:inline group-hover:inline">Landing</span>
+            <IconHome iconSize={20} />
+            <span>Home</span>
           </NavButton>
         </li>
         <li className="w-full h-full group">
@@ -37,8 +37,8 @@ const Nav: React.FC = () => {
             handleNavigation={handleNavigation}
             subDirectories={['Connections', 'Mapping', 'Profiles']}
           >
-            <IconCarThingSmall iconSize={30} />
-            <span className="hidden lg:inline group-hover:inline">Clients</span>
+            <IconCarThingSmall iconSize={20} />
+            <span>Devices</span>
           </NavButton>
         </li>
         <li className="w-full h-full group">
@@ -47,8 +47,8 @@ const Nav: React.FC = () => {
             currentPage={currentPage}
             handleNavigation={handleNavigation}
           >
-            <IconLayoutgrid iconSize={30} />
-            <span className="hidden lg:inline group-hover:inline">Apps</span>
+            <IconLayoutgrid iconSize={20} />
+            <span>Apps</span>
           </NavButton>
         </li>
         <li className="w-full h-full group">
@@ -58,8 +58,8 @@ const Nav: React.FC = () => {
             handleNavigation={handleNavigation}
             subDirectories={['App', 'Client']}
           >
-            <IconDownload iconSize={30} />
-            <span className="hidden lg:inline group-hover:inline">Downloads</span>
+            <IconDownload iconSize={20} />
+            <span>Downloads</span>
           </NavButton>
         </li>
         {is_nerd && (
@@ -70,8 +70,8 @@ const Nav: React.FC = () => {
               handleNavigation={handleNavigation}
               subDirectories={['Logs', 'App', 'ADB']}
             >
-              <IconWrench iconSize={30} />
-              <span className="hidden lg:inline group-hover:inline">Dev</span>
+              <IconWrench iconSize={20} />
+              <span>Developer</span>
             </NavButton>
           </li>
         )}
@@ -134,24 +134,20 @@ const NavButton = ({
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={handleClick}
-        className={`p-4 h-full w-full text-lg font-medium flex items-center justify-center gap-2 ${
-          currentPage.includes(location)
-            ? ' border-b border-green-500'
-            : 'text-gray-400 hover:bg-zinc-950 hover:text-white'
-        }`}
+        className={`nav-button ${currentPage.toLowerCase().includes(location.toLowerCase()) ? 'nav-button-active' : ''}`}
       >
         {children}
       </button>
       <div
-        className={`${isOpen ? 'max-h-[500px]' : 'max-h-0'} w-full absolute transition-[max-height] duration-300 ease-in-out z-10 overflow-hidden`}
+        className={`${isOpen ? 'max-h-[500px]' : 'max-h-0'} left-0 right-0 absolute transition-[max-height] duration-300 ease-in-out z-40 overflow-visible`}
       >
         {subDirectories && subDirectories.length > 0 && isOpen && (
-          <div className=" border border-black top-full left-0 w-full bg-zinc-900 ">
+          <div className="nav-dropdown">
             {subDirectories.map((subDir) => (
               <button
                 key={subDir}
                 onClick={() => handleNavigation(`/${location}/${subDir}`)}
-                className={`p-2 w-full text-left text-gray-400 hover:bg-zinc-950 hover:text-white ${currentPage.includes(subDir) ? 'bg-zinc-800' : ''}`}
+                className={`p-2 w-full text-left ${currentPage.toLowerCase().includes(subDir.toLowerCase()) ? 'nav-dropdown-active' : ''}`}
               >
                 {subDir}
               </button>

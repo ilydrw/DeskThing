@@ -272,7 +272,8 @@ export class ADBService implements ADBServiceClass {
         throw new Error('Client not found and was not able to be downloaded automatically')
       }
 
-      this.configureDevice(deviceId, port, forcePush, attempts + 1)
+      await this.configureDevice(deviceId, port, forcePush, attempts + 1)
+      return
     }
 
     // Successfully downloaded the latest client, can move on

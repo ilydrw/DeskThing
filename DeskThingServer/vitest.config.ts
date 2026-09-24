@@ -9,6 +9,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'html']
     },
     alias: {
+      'electron/main': resolve('test/mocks/electron-main.ts'),
       '@renderer': resolve('src/renderer/src'),
       '@server': resolve('src/main'),
       '@shared': resolve('src/shared'),

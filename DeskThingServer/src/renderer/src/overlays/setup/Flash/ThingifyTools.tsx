@@ -16,9 +16,6 @@ export const ThingifyTools = (): JSX.Element => {
   const [isLoading, setIsLoading] = useState(false)
   const [downloadResults, setDownloadResults] = useState<ThingifyArchiveDownloadResult | null>(null)
 
-  const recommendedFileId = 'iMktiQXVP4mC5lCe3WRQy'
-  const recommendedFirmwareId = 'Sn_vBLpPfJjic6DZtCj6k'
-
   const getFirmware = useFlashStore((state) => state.getFirmware)
   const getVersions = useFlashStore((state) => state.getVersions)
   const downloadFirmware = useFlashStore((state) => state.downloadFirmware)
@@ -84,7 +81,7 @@ export const ThingifyTools = (): JSX.Element => {
   return (
     <div className="flex flex-col gap-4">
       <div className="w-full flex justify-center">
-        <h1 className="text-xl">Download from ThingifyTools</h1>
+        <h1 className="text-xl">Firmware catalog</h1>
       </div>
       {downloadProgress ? (
         <div className="flex w-full">
@@ -123,25 +120,8 @@ export const ThingifyTools = (): JSX.Element => {
                 {downloadResults.operationText}
               </p>
               <p className="text-zinc-300 text-xs mt-3">
-                Having trouble? Join the{' '}
-                <a
-                  href="https://deskthing.app/discord"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-400 hover:text-blue-300 underline transition-colors duration-200"
-                >
-                  DeskThing Discord Server
-                </a>{' '}
-                and check the{' '}
-                <a
-                  href="https://canary.discord.com/channels/1267348109067817051/1292217043881299999"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-400 hover:text-blue-300 underline transition-colors duration-200"
-                >
-                  #resources
-                </a>{' '}
-                channel!
+                Upload a compatible firmware zip manually, or ask the maintainer of this build for
+                its configured firmware source.
               </p>
               <div className="mt-3">
                 <Button
@@ -178,6 +158,12 @@ export const ThingifyTools = (): JSX.Element => {
               {isLoading ? <p>Downloading...</p> : <p>Download Recommended</p>}
             </Button>
             <h3 className="text-base font-semibold text-white mb-3">Or download manually</h3>
+            {!isLoading && !firmware && (
+              <p className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 text-sm text-zinc-400">
+                No firmware catalog is configured for this build. You can still upload a firmware
+                archive manually.
+              </p>
+            )}
             <div className="space-y-2 flex flex-col-reverse">
               {firmware?.versions?.map((fw) => (
                 <Button
@@ -191,11 +177,6 @@ export const ThingifyTools = (): JSX.Element => {
                 >
                   <div className="flex justify-between items-start flex-col ">
                     <p className="font-semibold text-sm text-white">{fw.version}</p>
-                    {fw.id == recommendedFirmwareId && (
-                      <p className="font-semibold text-xs max-h-fit bg-emerald-700 rounded-lg px-2 text-white">
-                        Recommended
-                      </p>
-                    )}
                   </div>
 
                   <div className="text-xs mt-2 text-zinc-400 flex items-center gap-1">
@@ -238,11 +219,6 @@ export const ThingifyTools = (): JSX.Element => {
                           <p className="text-xs text-zinc-300">
                             {(file.fileSize / 1024 / 1024).toFixed(2)} MB
                           </p>
-                          {file.id == recommendedFileId && (
-                            <p className="font-semibold text-xs max-h-fit bg-emerald-700 rounded-lg px-2 text-white">
-                              Recommended
-                            </p>
-                          )}
                         </div>
                       </div>
                       <Button

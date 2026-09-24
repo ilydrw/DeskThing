@@ -9,6 +9,8 @@ import {
   Profile
 } from '@deskthing/types'
 import { MappingFileStructure, LoggingOptions } from '@shared/types'
+import { isRecord } from '@shared/validation/settings'
+import { assertSafePathSegment } from '@server/utils/pathSecurity'
 
 export const validMappingExists: (
   mapping: MappingFileStructure | unknown,
@@ -23,6 +25,7 @@ export const validMappingExists: (
 }
 
 export const isValidMappingStructure = async (structure: unknown): Promise<void> => {
+  isValidFileStructure(structure)
   if (!structure) throw new Error('Mapping structure is undefined')
   if (typeof structure !== 'object') {
     Logger.log(LOGGING_LEVELS.ERROR, 'validateMappingStructure: Structure is not an object!')
@@ -45,7 +48,7 @@ export const isValidMappingStructure = async (structure: unknown): Promise<void>
   await Promise.all(
     Object.values(structObj.profiles).map(async (profile) => {
       try {
-        isValidProfile(profile)
+        isValidButtonMapping(profile)
       } catch (error) {
         Logger.log(
           LOGGING_LEVELS.ERROR,
@@ -138,6 +141,13 @@ export const isValidFileStructure: (
     throw new Error('Must have at least one profile')
   }
 
+  for (const [key, profile] of Object.entries(structure.profiles)) {
+    assertSafePathSegment(key, 'Profile identifier')
+    if (key !== profile.id) throw new Error('Profile identifier does not match its index key')
+  }
+  if (!('selected_profile' in structure)) throw new Error('Selected profile is missing')
+  isValidProfile(structure.selected_profile)
+
   if (!('actions' in structure)) {
     Logger.log(LOGGING_LEVELS.ERROR, 'validateFileStructure: Actions is not defined!')
     throw new Error('Actions must be defined')
@@ -198,6 +208,7 @@ export const isValidProfile: (profile: unknown) => asserts profile is Profile = 
     Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: Id is not a string!')
     throw new Error('Id must be a string')
   }
+  assertSafePathSegment(profile.id, 'Profile identifier')
   if (!('version' in profile)) {
     Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: Name is not defined!')
     throw new Error('Name must be defined')
@@ -216,7 +227,7 @@ export const isValidButtonMapping: (mapping: unknown) => asserts mapping is Butt
     Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: Mapping is not defined!')
     throw new Error('Mapping must be defined')
   }
-  if (typeof mapping.mapping !== 'object') {
+  if (!isRecord(mapping.mapping)) {
     Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: Mapping is not an object!')
     throw new Error('Mapping must be an object')
   }
@@ -228,7 +239,7 @@ export const isValidButtonMapping: (mapping: unknown) => asserts mapping is Butt
       Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: Key is not a string!')
       throw new Error('Key must be a string')
     }
-    if (typeof modes !== 'object') {
+    if (!isRecord(modes)) {
       Logger.log(LOGGING_LEVELS.ERROR, 'validateProfile: modes is not an object!')
       throw new Error('Modes must be an object')
     }
@@ -279,7 +290,6 @@ export const sanitizeAction = (action: unknown): Action => {
   const sanitized = action as Action
   if (!action || typeof action !== 'object') throw new Error('Action must be an object')
 
-
   sanitized.name = sanitized.name || 'Default Name'
   sanitized.description = sanitized.description || 'No description provided'
   sanitized.id = sanitized.id || 'unsetid'
@@ -304,7 +314,7 @@ export const sanitizeAction = (action: unknown): Action => {
 export const isValidActionReference: (action: unknown) => asserts action is ActionReference = (
   action
 ) => {
-  if (typeof action !== 'object') {
+  if (!isRecord(action)) {
     throw new Error('Action reference must be an object')
   }
   const actionRef = action as ActionReference

@@ -79,10 +79,10 @@ const TagList: React.FC<TagListProps> = ({
         activeSuggestion: '',
         editTagInput: '',
         editTagInputField: '',
-        tag: 'bg-zinc-700 px-2 py-1 mr-1 rounded-md hover:ring-indigo-500',
+        tag: 'bg-zinc-700 px-2 py-1 mr-1 rounded-md hover:ring-emerald-500',
         remove: 'ml-3 mt-3',
         tagInputField:
-          'mt-2 block px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm w-96 max-w-s',
+          'mt-2 block px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm w-96 max-w-s',
         clearAll:
           'mt-1 block px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md shadow-sm hover:outline-none hover:ring-red-500 hover:border-red-500 sm:text-sm'
       }}

@@ -17,6 +17,10 @@ import { Worker } from 'node:worker_threads'
 import { app } from 'electron/main'
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { LOGGING_LEVELS } from '@deskthing/types'
+import { basename, extname, join } from 'node:path'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 export class FlashStore
   extends EventEmitter<FlashStoreEvents>
@@ -24,6 +28,9 @@ export class FlashStore
 {
   private flashProcess: Worker | null = null
   private _initialized: boolean = false
+  private flashRunning = false
+  private workerInitialization?: Promise<void>
+  private stepRequest?: Promise<number | null>
 
   private _flashState: FlashingState = {
     progress: {}
@@ -38,7 +45,7 @@ export class FlashStore
   }
 
   private setupWorker = async (): Promise<void> => {
-    if (this.flashProcess) this.flashProcess?.terminate()
+    if (this.flashProcess) await this.flashProcess.terminate()
 
     this.flashProcess = new Worker(flashProcessPath, {
       workerData: { userDataPath: app.getPath('userData'), stdout: true, stderr: true },
@@ -50,6 +57,11 @@ export class FlashStore
   }
 
   private setupWorkerListeners(): void {
+    const worker = this.flashProcess
+    worker?.on('exit', () => {
+      if (this.flashProcess === worker) this.flashProcess = null
+      this.emit('flash-stopped', false)
+    })
     this.flashProcess?.on('message', (data: FlashProcess) => {
       try {
         switch (data.type) {
@@ -75,6 +87,7 @@ export class FlashStore
     })
 
     this.flashProcess?.on('error', (error) => {
+      this.emit('flash-stopped', false)
       logger.error(`FlashProcess worker Error: ${error}`, {
         source: 'flashStore',
         function: 'setupWorkerListeners'
@@ -252,7 +265,8 @@ export class FlashStore
   // Wraps the post message to type it
   private async sendToFlash(message: FlashServer): Promise<void> {
     if (!this.flashProcess) {
-      await this.setupWorker()
+      this.workerInitialization ??= this.setupWorker().finally(() => { this.workerInitialization = undefined })
+      await this.workerInitialization
     }
 
     this.flashProcess?.postMessage(message)
@@ -265,7 +279,7 @@ export class FlashStore
 
   public clearCache = async (): Promise<void> => {
     if (this._flashState.state != 'progress') {
-      this.flashProcess?.terminate()
+      await this.flashProcess?.terminate()
       this.flashProcess = null
     }
   }
@@ -275,6 +289,10 @@ export class FlashStore
   }
 
   async startFlash(imagePath: string): Promise<void> {
+    if (this.flashRunning) throw new Error('A flash operation is already running')
+    this.flashRunning = true
+    this._flashState.state = 'progress'
+    this._flashState.stepTotal = undefined
     try {
       progressBus.startOperation(
         ProgressChannel.ST_FLASH_RUNNER,
@@ -296,17 +314,26 @@ export class FlashStore
         payload: imagePath
       })
 
-      this.getFlashSteps()
+      if (this.isFlashCancelled()) throw new Error('Flash was cancelled')
+      const steps = await this.getFlashSteps()
+      if (!steps) throw new Error('Unable to determine flash steps; no flash command was sent')
+      if (this.isFlashCancelled()) throw new Error('Flash was cancelled')
 
       progressBus.start(ProgressChannel.FN_FLASH_RUNNER, 'Flashing Device', 'Initializing Flash')
 
-      await this.sendToFlash({ type: 'operation', request: 'start' })
-
-      await new Promise((resolve, reject) =>
-        this.once('flash-stopped', (data) =>
-          data ? resolve(true) : reject('Flash was killed unexpectedly')
-        )
-      )
+      await new Promise<void>((resolve, reject) => {
+        const stopped = (success: boolean): void => {
+          this.off('flash-stopped', stopped)
+          if (success) resolve()
+          else reject(new Error('Flash was cancelled or the worker stopped unexpectedly'))
+        }
+        // Subscribe before sending so a fast completion cannot be missed.
+        this.once('flash-stopped', stopped)
+        void this.sendToFlash({ type: 'operation', request: 'start' }).catch((error) => {
+          this.off('flash-stopped', stopped)
+          reject(error)
+        })
+      })
 
       if (
         !this._flashState.step ||
@@ -340,11 +367,13 @@ export class FlashStore
         'Error flashing device',
         error instanceof Error ? error.message : handleError(error)
       )
-      this._flashState.state = 'error'
+      if (!this.isFlashCancelled()) this._flashState.state = 'error'
       this._flashState.errorText = error instanceof Error ? error.message : 'Unknown error'
       this._flashState.suggestion = undefined
       this.emit('flash-completed', false)
       throw error
+    } finally {
+      this.flashRunning = false
     }
   }
 
@@ -400,6 +429,7 @@ export class FlashStore
 
       this.emit('flash-state', this._flashState)
 
+      this.emit('flash-stopped', false)
       await this.flashProcess?.terminate()
       this.flashProcess = null
       logger.debug('Flash process cancelled', {
@@ -414,6 +444,8 @@ export class FlashStore
     }
   }
 
+  private isFlashCancelled(): boolean { return this._flashState.state === 'cancelled' }
+
   async getFlashStatus(): Promise<FlashingState | null> {
     return this._flashState
   }
@@ -423,16 +455,36 @@ export class FlashStore
       return this._flashState.stepTotal
     }
 
-    return new Promise((resolve) => {
-      this.once('total-steps', (steps) => {
+    this.stepRequest ??= new Promise<number | null>((resolve) => {
+      const finish = (steps: number | null): void => {
+        clearTimeout(timeout)
+        this.off('total-steps', onSteps)
+        this.off('flash-stopped', stopped)
         resolve(steps)
+      }
+      const onSteps = (steps: number): void => finish(Number.isInteger(steps) && steps > 0 ? steps : null)
+      const stopped = (): void => finish(null)
+      const timeout = setTimeout(() => {
+        logger.warn('Flash worker did not provide its step count within 10 seconds', { source: 'flashStore', function: 'getFlashSteps' })
+        finish(null)
+      }, 10000)
+      this.once('total-steps', onSteps)
+      this.once('flash-stopped', stopped)
+      void this.sendToFlash({ type: 'request', request: FLASH_REQUEST.STEPS }).catch((error) => {
+        logger.error('Unable to request flash steps', { source: 'flashStore', error: error as Error })
+        finish(null)
       })
-      this.sendToFlash({ type: 'request', request: FLASH_REQUEST.STEPS })
-    })
+    }).finally(() => { this.stepRequest = undefined })
+    return this.stepRequest
+  }
+
+  async dispose(): Promise<void> {
+    if (this.flashProcess) await this.cancelFlash()
   }
 
   async configureDriverForDevice(): Promise<void> {
     let childProcess: ChildProcessWithoutNullStreams | null = null
+    let installerPath: string | null = null
 
     try {
       progressBus.start(
@@ -441,20 +493,70 @@ export class FlashStore
         'Installing device driver...'
       )
 
-      if (process.platform === 'win32') {
-        // For Windows, use PowerShell with proper command structure
-        childProcess = spawn(
-          'powershell.exe',
-          ['-ExecutionPolicy', 'Bypass', '-Command', 'irm https://driver.terbium.app/get | iex'],
-          {
-            shell: false // Don't use shell since we're calling powershell.exe directly
-          }
+      const { driverInstallerUrl, driverInstallerSha256 } = getServiceConfig()
+      if (!driverInstallerUrl || !driverInstallerSha256) {
+        throw new Error(
+          'No verified driver installer is configured. Install the GX-CHIP driver manually, then continue.'
         )
+      }
+
+      progressBus.update(ProgressChannel.ST_FLASH_DRIVER, 'Downloading verified installer', 20)
+
+      const response = await fetch(driverInstallerUrl)
+      if (!response.ok) {
+        throw new Error(
+          `Driver installer download failed: ${response.status} ${response.statusText}`
+        )
+      }
+
+      const installer = Buffer.from(await response.arrayBuffer())
+      const actualSha256 = createHash('sha256').update(installer).digest('hex')
+      if (actualSha256 !== driverInstallerSha256) {
+        throw new Error('Driver installer checksum did not match the configured SHA-256 digest')
+      }
+
+      const installerName = basename(new URL(driverInstallerUrl).pathname)
+      const extension = extname(installerName).toLowerCase()
+      if (!installerName || !extension) {
+        throw new Error('Configured driver installer URL must include a file name and extension')
+      }
+
+      const installerDirectory = join(app.getPath('temp'), 'deskthing-drivers')
+      installerPath = join(installerDirectory, installerName)
+      await mkdir(installerDirectory, { recursive: true })
+      await writeFile(installerPath, installer)
+
+      progressBus.update(
+        ProgressChannel.ST_FLASH_DRIVER,
+        'Checksum verified; starting installer',
+        60
+      )
+
+      if (process.platform === 'win32') {
+        if (extension === '.exe') {
+          childProcess = spawn(installerPath, [], { shell: false, windowsHide: true })
+        } else if (extension === '.msi') {
+          childProcess = spawn('msiexec.exe', ['/i', installerPath, '/passive'], {
+            shell: false,
+            windowsHide: true
+          })
+        } else if (extension === '.ps1') {
+          childProcess = spawn(
+            'powershell.exe',
+            ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', installerPath],
+            {
+              shell: false,
+              windowsHide: true
+            }
+          )
+        } else {
+          throw new Error('Windows driver installers must use .exe, .msi, or .ps1')
+        }
       } else {
-        // For Unix-like systems, use bash with proper pipe handling
-        childProcess = spawn('bash', ['-c', 'curl -sSL https://driver.terbium.app/get | bash'], {
-          shell: false // Don't use shell since we're calling bash directly
-        })
+        if (extension !== '.sh') {
+          throw new Error('Unix driver installers must use .sh')
+        }
+        childProcess = spawn('bash', [installerPath], { shell: false })
       }
 
       childProcess.stdout.on('data', (data) => {
@@ -476,7 +578,7 @@ export class FlashStore
 
       await new Promise((resolve, reject) => {
         childProcess?.on('close', (code) => {
-          if (code === 0) {
+          if (code === 0 || code === 3010) {
             resolve(null)
           } else {
             reject(new Error(`Process exited with code ${code}`))
@@ -501,6 +603,9 @@ export class FlashStore
     } finally {
       if (childProcess) {
         childProcess?.kill()
+      }
+      if (installerPath) {
+        await unlink(installerPath).catch(() => undefined)
       }
     }
   }

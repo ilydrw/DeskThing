@@ -4,7 +4,7 @@ import type { Stats, Registration } from '@shared/types'
 type StatsResult =
   | { success: true; status: number }
   | { success: false; status: number; error: Error }
-type StatsOptions = { fetch?: typeof globalThis.fetch; baseUrl?: string; headers?: HeadersInit }
+type StatsOptions = { fetch?: typeof globalThis.fetch; baseUrl: string; headers?: HeadersInit }
 
 export class DeskThingStats {
   private readonly baseUrl: string
@@ -27,13 +27,9 @@ export class DeskThingStats {
   constructor(
     private readonly clientId: string,
     private readonly privateKey: CryptoKey,
-    private readonly options: StatsOptions = {
-      fetch: globalThis.fetch,
-      baseUrl: 'https://stats.deskthing.app',
-      headers: {}
-    }
+    private readonly options: StatsOptions
   ) {
-    this.baseUrl = options.baseUrl ?? 'https://stats.deskthing.app'
+    this.baseUrl = options.baseUrl
     this.fetch = options.fetch ?? globalThis.fetch
   }
 
@@ -66,13 +62,10 @@ export class DeskThingStats {
 
       if (response.ok) return { success: true, status: response.status }
       else {
-        logger.error(
-          `Failed to register client: ${response.status} - ${response.statusText}. Registering with headers ${JSON.stringify(headers)} and registration data: ${stringifiedData}`,
-          {
-            function: 'register',
-            source: 'statsFetchWrapper'
-          }
-        )
+        logger.error(`Failed to register client: ${response.status} - ${response.statusText}`, {
+          function: 'register',
+          source: 'statsFetchWrapper'
+        })
         return {
           success: false,
           status: response.status,

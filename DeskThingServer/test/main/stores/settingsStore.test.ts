@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { SettingsStore } from '@server/stores/settingsStore'
-import { writeToFile } from '@server/services/files/fileService'
+import { readFromFile, writeToFile } from '@server/services/files/fileService'
+import { defaultSettings } from '@server/static/defaultSettings'
+import { Settings } from '@shared/types'
 
 vi.mock('os', () => ({
   default: {
@@ -57,6 +59,7 @@ describe('SettingsStore', () => {
   let settingsStore: SettingsStore
 
   beforeEach(async () => {
+    vi.mocked(readFromFile).mockResolvedValue(undefined)
     settingsStore = new SettingsStore()
     await settingsStore.initialize()
     vi.clearAllMocks()
@@ -67,6 +70,73 @@ describe('SettingsStore', () => {
   })
 
   describe('Settings Management', () => {
+    it('preserves usable legacy values while replacing invalid fields', async () => {
+      vi.mocked(readFromFile).mockResolvedValueOnce({ version: '0.9.0', server_minimizeApp: false, device_devicePort: 'bad', adb_blacklist: ['one'], flag_misc: null })
+      const store = new SettingsStore()
+      const settings = await store.getSettings()
+      expect(settings.server_minimizeApp).toBe(false)
+      expect(settings.device_devicePort).toBe(defaultSettings.device_devicePort)
+      expect(settings.adb_blacklist).toEqual(['one'])
+      expect(settings.flag_misc).toBeUndefined()
+    })
+
+    it('does not save defaults over unreadable settings', async () => {
+      vi.mocked(readFromFile).mockRejectedValueOnce(new Error('Permission denied'))
+      const store = new SettingsStore()
+      await store.initialize()
+      expect(writeToFile).not.toHaveBeenCalled()
+    })
+
+    it('does not commit or notify on a failed save', async () => {
+      const listener = vi.fn()
+      settingsStore.addSettingsListener(listener)
+      vi.mocked(writeToFile).mockRejectedValueOnce(new Error('Disk full'))
+      await expect(settingsStore.saveSetting('device_devicePort', 9998)).rejects.toThrow('Disk full')
+      expect(await settingsStore.getSetting('device_devicePort')).toBe(defaultSettings.device_devicePort)
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it('serializes concurrent settings updates and protects in-memory state from callers', async () => {
+      await Promise.all([settingsStore.saveSetting('device_devicePort', 9998), settingsStore.saveSetting('server_callbackPort', 9999)])
+      const settings = await settingsStore.getSettings()
+      expect(settings.device_devicePort).toBe(9998)
+      expect(settings.server_callbackPort).toBe(9999)
+      settings.adb_blacklist.push('outside mutation')
+      expect(await settingsStore.getSetting('adb_blacklist')).toEqual([])
+    })
+
+    it('rejects invalid ports from runtime callers', async () => {
+      await expect(settingsStore.saveSetting('device_devicePort', 0)).rejects.toThrow('Invalid value')
+      expect(writeToFile).not.toHaveBeenCalled()
+    })
+    it('should disable usage diagnostics by default', async () => {
+      expect(await settingsStore.getSetting('flag_collectStats')).toBe(false)
+      expect(await settingsStore.getSetting('privacy_statsConsentVersion')).toBe(1)
+    })
+
+    it('should reset legacy statistics settings until the user explicitly opts in', async () => {
+      const legacySettings = {
+        ...defaultSettings,
+        version: '0.11.17',
+        flag_collectStats: true
+      } as Settings
+      delete (legacySettings as Partial<Settings>).privacy_statsConsentVersion
+
+      vi.mocked(readFromFile).mockResolvedValueOnce(legacySettings)
+
+      const migratedStore = new SettingsStore()
+      await migratedStore.initialize()
+
+      expect(await migratedStore.getSetting('flag_collectStats')).toBe(false)
+      expect(await migratedStore.getSetting('privacy_statsConsentVersion')).toBe(1)
+      expect(writeToFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flag_collectStats: false,
+          privacy_statsConsentVersion: 1
+        }),
+        'settings.json'
+      )
+    })
 
     it('should handle multiple setting updates in sequence', async () => {
       await settingsStore.saveSetting('server_callbackPort', 9999)

@@ -134,7 +134,7 @@ const ADBSettings: React.FC = () => {
               }}
             />
             <Button
-              className="text-nowrap border group border-cyan-500 hover:bg-cyan-500"
+              className="text-nowrap border group border-emerald-600 hover:bg-emerald-600"
               onClick={sendCommand}
             >
               <p>Run Command</p>

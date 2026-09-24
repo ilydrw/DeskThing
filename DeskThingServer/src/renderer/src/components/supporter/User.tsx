@@ -22,7 +22,7 @@ const User: React.FC<UserProps> = ({ name, contribution, avatar }) => {
           className="w-10 h-10 rounded-full bg-zinc-700 ring-2 ring-emerald-500/30 group-hover:ring-emerald-500/70 transition-all duration-300"
         />
       ) : (
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-600 to-emerald-800 flex items-center justify-center text-zinc-100 font-semibold text-sm ring-2 ring-emerald-500/30 group-hover:ring-emerald-500/70 transition-all duration-300">
+        <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center text-zinc-100 font-semibold text-sm border border-emerald-700">
           {sanitizedName.charAt(0).toUpperCase()}
         </div>
       )}

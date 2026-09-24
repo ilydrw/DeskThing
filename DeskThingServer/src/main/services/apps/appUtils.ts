@@ -5,6 +5,7 @@ import Logger from '@server/utils/logger'
 import { AppManifest, LOGGING_LEVELS } from '@deskthing/types'
 import { existsSync } from 'node:fs'
 import { app } from 'electron'
+import { assertSafePathSegment, resolvePathWithinRoot } from '@server/utils/pathSecurity'
 
 /**
  * Retrieves and parses the manifest file for an app.
@@ -41,22 +42,38 @@ export const getManifest = async (fileLocation: string): Promise<AppManifest | u
  * @param {string} fileName - The name of the file to retrieve.
  * @returns {string} - The full file path of the specified file within the app's directory.
  */
-export function getAppFilePath(appName: string, fileName: string = '/'): string {
-  let path
-  if (appName == 'developer-app') {
+export function getAppFilePath(appName: string, fileName = '.'): string {
+  assertSafePathSegment(appName, 'App identifier')
+  if (appName === 'developer-app') {
     Logger.log(LOGGING_LEVELS.ERROR, 'Developer app does not exist!')
-  } else {
-    path = join(app.getPath('userData'), 'apps', appName, fileName)
+    throw new Error('Developer app does not exist')
   }
-  return path
+
+  const appsRoot = join(app.getPath('userData'), 'apps')
+  const appPath = resolvePathWithinRoot(appsRoot, appName, fileName)
+  if (!appPath) {
+    throw new Error('App path escapes the application directory')
+  }
+
+  return appPath
 }
 
 export const getStandardizedFilename = (appId: string, version: string): string => {
+  assertSafePathSegment(appId, 'App identifier')
+  assertSafePathSegment(version, 'App version')
   return `${appId}-v${version}.zip`
 }
 
 export const getIcon = async (appName: string, icon?: string): Promise<string | null> => {
-  const iconPath = join(getAppFilePath(appName), 'icons', icon || `${appName}.svg`)
+  const iconRoot = getAppFilePath(appName, 'icons')
+  const iconPath = resolvePathWithinRoot(iconRoot, icon || `${appName}.svg`)
+  if (!iconPath) {
+    Logger.warn(`Rejected an icon path outside the directory for ${appName}`, {
+      source: 'getIcon'
+    })
+    return null
+  }
+
   try {
     const exists = await access(iconPath)
       .catch(() => false)

@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
+import distributionDefaults from './distribution.json'
+import { parseDistributionConfig } from './src/main/config/distributionConfig'
+
+// Fail the build before producing artifacts with invalid public service defaults.
+parseDistributionConfig(distributionDefaults)
 
 const _filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(_filename)

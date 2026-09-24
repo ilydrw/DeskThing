@@ -11,21 +11,23 @@ interface SidebarProps {
 const MainElement: React.FC<SidebarProps> = ({ children, className }) => {
   return (
     <ErrorBoundary
-      fallback={(reset) => 
+      fallback={(reset) => (
         <DownloadErrorOverlay
           error={`An unknown error occurred while loading this page.\nPlease try refreshing the page or restarting the application.`}
           title="Error Loading Page"
           onAcknowledge={reset}
           inset
         />
-      }
+      )}
     >
-      <div className="w-full h-full relative overflow-auto">
-        <div className="flex flex-col h-full w-full absolute inset">
+      <main className="main-surface">
+        <div className="flex flex-col h-full w-full absolute inset-0">
           <Papertrail />
-          <div className={'h-full w-full overflow-auto flex flex-col ' + className}>{children}</div>
+          <div className={`h-full min-h-0 w-full overflow-hidden flex flex-col ${className || ''}`}>
+            {children}
+          </div>
         </div>
-      </div>
+      </main>
     </ErrorBoundary>
   )
 }

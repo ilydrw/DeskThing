@@ -5,6 +5,7 @@ import path from 'path'
 import { shell, app, dialog } from 'electron'
 import { setupFirewall } from '../../handlers/firewallHandler'
 import { storeProvider } from '@server/stores/storeProvider'
+import { getDeviceConnectionOptions } from '@server/stores/platforms/platformConfig'
 import { progressBus } from '@server/services/events/progressBus'
 import { ProgressChannel } from '@shared/types'
 
@@ -251,8 +252,10 @@ export const utilityHandler: {
 
   [IPC_UTILITY_TYPES.RESTART_SERVER]: async () => {
     const platformStore = await storeProvider.getStore('platformStore')
+    const settingsStore = await storeProvider.getStore('settingsStore')
+    const connectionOptions = await getDeviceConnectionOptions(settingsStore)
     progressBus.start(ProgressChannel.IPC_UTILITY, 'restart', 'Restarting server...')
-    await platformStore.restartPlatform(PlatformIDs.WEBSOCKET)
+    await platformStore.restartPlatform(PlatformIDs.WEBSOCKET, connectionOptions)
     progressBus.complete(ProgressChannel.IPC_UTILITY, 'restart', 'Server Restarted')
   },
   [IPC_UTILITY_TYPES.ACTIONS]: async (data) => {

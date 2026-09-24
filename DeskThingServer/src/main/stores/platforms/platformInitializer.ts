@@ -2,10 +2,13 @@ import Logger from '@server/utils/logger'
 import { storeProvider } from '@server/stores/storeProvider'
 import { WebSocketPlatform } from './websocket/wsPlatform'
 import { ADBPlatform } from './superbird/adbPlatform'
+import { getDeviceConnectionOptions } from './platformConfig'
 
 export async function initializePlatforms(): Promise<void> {
   try {
     const platformStore = await storeProvider.getStore('platformStore')
+    const settingsStore = await storeProvider.getStore('settingsStore')
+    const connectionOptions = await getDeviceConnectionOptions(settingsStore)
 
     // Initialize WebSocket platform
     const wsPlatform = new WebSocketPlatform()
@@ -14,13 +17,10 @@ export async function initializePlatforms(): Promise<void> {
     await platformStore.registerPlatform(adbPlatform)
 
     // Start the ws platform
-    await platformStore.startPlatform(wsPlatform.id, {
-      port: 8891,
-      address: '0.0.0.0'
-    })
+    await platformStore.startPlatform(wsPlatform.id, connectionOptions)
 
     await platformStore.startPlatform(adbPlatform.id, {
-      autoDetect: true
+      port: connectionOptions.port
     })
 
     Logger.debug('Platforms initialized successfully', {

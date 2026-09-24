@@ -1,21 +1,23 @@
+# DeskThing Community (working name)
+
+An independent community continuation of DeskThing, originally created by Riprod.
+This fork is in development; public installers are not available yet.
+See the [public launch plan](docs/PUBLIC_LAUNCH.md) for release gates, product
+priorities, compatibility testing, and community ownership.
+
 ![Youtube Banner](https://github.com/user-attachments/assets/78aa432b-e86e-4945-9b57-931a7ae5c5cb)
 ![image](https://github.com/user-attachments/assets/4f4ee062-14df-49df-968a-d196746ef80f)
 
-*Quick Links*
- > ❔[Reddit Link](https://reddit.com/r/DeskThing)
+*Project links*
 
- > 📃[Trello Board](https://trello.com/b/6v0paxqV/deskthing)
+> 📘 Fork operations and service ownership are documented in [`docs/`](docs/).
 
- > 💬[Deskthing Discord](https://discord.gg/uNS3dhj46D)
+> 💬 Community links are intentionally not assigned until this fork has its own moderation team.
 
- > 🌐[Official Deskthing Website](https://deskthing.app)
-
- > 📺 [Deskthing Youtube Channel](https://www.youtube.com/@DeskThing)
- 
- > 💬 [Car Thing Hax Community Discord](https://discord.carth.ing/)
+> 🌐 Distribution links will be added after this fork has project-owned hosting and signing.
 
 ---
-# ‼️DeskThing is completely free to use but [donations](https://deskthing.app/support) are greatly appreciated ☕
+# ‼️DeskThing is free and open source under the MIT license.
 
 ---
 
@@ -23,20 +25,20 @@
 
 *Let's begin, shall we?*
 
-This is the DeskThing project. Using Spotify's existing Car Thing, the DeskThing makes the perfect desk assistant. In short, the DeskThing serves as an alternative OS for the Spotify Car Thing. It allows you to load up community-made apps to it to do anything from control your local audio to seeing who is in your discord call! If you want to help contribute to this endeavor and attempt to revive the car thing, you can do so through my buymeacoffee link or through Github Sponsors.
+DeskThing turns Spotify's discontinued Car Thing into a configurable desk or vehicle
+display backed by a desktop Electron server. This community fork focuses on reliable
+device connections, privacy-first defaults, independently owned distribution services,
+and a maintainable release process.
 
-Cheers!
+The original project was created by Riprod and remains attributed under the MIT license.
+This fork does not claim ownership of the original project's accounts, domains, or
+trademarks.
 
-*Dammit Jeff posted a video covering the DeskThing! Check it out [here](https://youtu.be/vQVuGeoqyUc?si=80bZQEFqH__qxppf&t=416)*
-
-**⚠️DO NOT PULL MAIN BRANCH TO INSTALL ⚠️**
-
-Instead, go to [The Official Website](https://deskthing.app/) and download the installer for your OS
-For a video walkthrough of v0.6.0, go to [this video](https://www.youtube.com/watch?v=iW2biAnq0n8)
-
-
+For development and testing, build from source using the instructions below.
+End-user installation instructions will accompany the first public beta.
 ---
-> All instructions are up-to-date as late of v0.9.0-beta. Later versions may differ in functionality and setup
+> The feature screenshots and setup video below are historical upstream references,
+> not verified instructions or screenshots for this fork.
 <details>
    <summary><h2>✨ Features</h2></summary>
 
@@ -60,7 +62,7 @@ Note: Not all of these are updated and are pending a revision. This is new as of
 <img width="1369" height="874" alt="image" src="https://github.com/user-attachments/assets/5afb8396-d536-43ed-9a58-2bf9ae4ddc37" />
 *The deskthing mappings page - will be updated in v0.12*
 
-## App Highlights (View the rest on the [deskthing website](https://deskthing.app/apps) or in the app store in deskthing)
+## App Highlights
 <img width="1108" height="687" alt="image" src="https://github.com/user-attachments/assets/66e7e296-e2fe-4306-af1a-7cf59c88f9f3" />
 
 
@@ -115,15 +117,15 @@ While older versions may work, this is recommended.
 <img src="readme_images/bar.svg" style="width: 100%;" alt="Click to see the source">
 
 ### Local Development / Contribution
-Node Version: >=v25.0.0
-NPM Version: >=11.6.2
+Node Version: >=v22.15.0
+NPM Version: >=10.0.0
 
-**Note:** These steps are for developers contributing to the project. For end-users installing DeskThing, do not pull the main branch—use the installer from [The Official Website](https://deskthing.app/) instead.
+**Note:** Signed end-user installers are not published by this fork yet. Current builds are intended for development and testing.
 
 
 1. Clone the repo
 ```sh
-git clone https://github.com/itsriprod/deskthing
+git clone <your-fork-url>
 ```
 
 2. cd into the directory
@@ -133,7 +135,7 @@ cd ./deskthing/DeskThingServer
 
 3. Install packages
 ```sh
-npm install
+npm ci
 ```
 
 4. Run the development build
@@ -142,6 +144,14 @@ npm run dev
 ```
 
 That's it, you should be off to the races! A few aspects of the app are different while in development, but nothing monumental. 
+
+Before opening a pull request, run:
+```sh
+npm run verify
+```
+
+Optional self-hosted statistics, feedback, and supporter integrations are
+documented in [`docs/SERVICE_CONFIGURATION.md`](docs/SERVICE_CONFIGURATION.md).
 
 The architecture is
 ```
@@ -152,23 +162,9 @@ src/
    shared/ // shared types between the frontend and backend that are local to the server (global types are in @deskthing/types)
 ```
 
-If you notice a lot of types issues, this may be due to the @deskthing/types being unpublished. To solve, you'll need to clone the Types package and link it locally 
-
-*in a new, unrelated directory:*
-```sh
-git clone https://github.com/itsriprod/deskthing-types
-cd deskthing-types
-npm install
-# On linux you may have to run this as sudo due to symlinks
-npm link
-```
-
-*in the deskthingserver directory*
-```sh
-npm link @deskthing/types
-```
-
-There, now you'll be using the development form of the types package!
+`@deskthing/types` is installed from npm with the other dependencies. When developing
+a compatible types fork locally, use npm's standard `npm link` workflow and keep the
+linked version aligned with the range in `DeskThingServer/package.json`.
 
 </details>
 
@@ -186,7 +182,7 @@ Welcome contributions! Here's how to get started:
 - **Reporting Issues:** Use GitHub Issues to report bugs or suggest features. Include details like OS, DeskThing version, and steps to reproduce.
 - **Submitting Pull Requests:** Fork the repo, make changes on a feature branch, and submit a PR. Ensure code follows the project's style (e.g., TypeScript types from @deskthing/types or shared/ directory). For new features, include screenshots or demos if applicable.
 - **Coding Standards:** Use ESLint/Prettier if configured. Test your changes locally before submitting.
-- **Questions:** Join the [DeskThing Discord](https://discord.gg/uNS3dhj46D) for discussions.
+- **Questions:** Open a discussion or issue in the repository that distributed your build.
 
 </details>
 
@@ -203,7 +199,7 @@ Welcome contributions! Here's how to get started:
 ---
 
 
-> Questions? DM me on discord @riprod
+> For this fork, use repository discussions or issues so answers remain public and searchable.
 
 <details>
 <summary>
@@ -217,8 +213,8 @@ Welcome contributions! Here's how to get started:
 
 </details>
 
-*DeskThing wouldn't be possible without our sponsors*
+*Historical upstream sponsor acknowledgment*
 
 ![helium-badge](https://github.com/user-attachments/assets/f0256b3a-0a96-4ba9-ba8d-7c0a45aa0d68)
 
-*Want to support deskthing? You can [here!](https://deskthing.app/support)*
+*This fork does not currently collect donations.*

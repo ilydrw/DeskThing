@@ -1,6 +1,7 @@
 import { Action, ActionReference, ClientManifest } from '@deskthing/types'
 import { IPC_HANDLERS } from './ipcTypes'
 import { ClientDownloadReturnData } from '../releases'
+import { KnownDevice } from '../devices'
 
 export enum IPC_CLIENT_TYPES {
   ZIP = 'zip',
@@ -13,6 +14,7 @@ export enum IPC_CLIENT_TYPES {
   OPEN_CLIENT = 'open-client',
   RUN_DEVICE_COMMAND = 'run-device-command',
   ICON = 'icon',
+  KNOWN_DEVICES = 'known-devices',
   DOWNLOAD_LATEST = 'download-latest'
 }
 
@@ -82,6 +84,20 @@ export type ClientIPCData = {
   | {
       type: IPC_CLIENT_TYPES.OPEN_CLIENT
     }
+  | {
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES
+      request: 'get'
+    }
+  | {
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES
+      request: 'rename'
+      payload: { deviceId: string; displayName?: string }
+    }
+  | {
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES
+      request: 'forget'
+      payload: { deviceId: string }
+    }
 )
 export type ClientHandlerReturnMap = {
   [IPC_CLIENT_TYPES.ZIP]: { set: ClientDownloadReturnData }
@@ -100,6 +116,11 @@ export type ClientHandlerReturnMap = {
   [IPC_CLIENT_TYPES.ICON]: { set: void; get: string | null }
   [IPC_CLIENT_TYPES.OPEN_CLIENT]: { set: boolean }
   [IPC_CLIENT_TYPES.DOWNLOAD_LATEST]: { set: ClientManifest | undefined }
+  [IPC_CLIENT_TYPES.KNOWN_DEVICES]: {
+    get: KnownDevice[]
+    rename: KnownDevice | undefined
+    forget: boolean
+  }
 }
 
 export type ClientHandlerReturnType<

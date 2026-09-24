@@ -7,6 +7,7 @@ import Button from '@renderer/components/Button'
 import ErrorBoundary from '@renderer/components/ErrorBoundary'
 import WebsocketDetails from './WebsocketDetails'
 import { useSearchParams } from 'react-router-dom'
+import useClientStore, { findKnownDeviceForClient } from '@renderer/stores/clientStore'
 
 interface ClientDetailsOverlayProps {
   onClose: () => void
@@ -16,6 +17,13 @@ interface ClientDetailsOverlayProps {
 const ClientDetailsOverlay: React.FC<ClientDetailsOverlayProps> = ({ onClose, client }) => {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedIdentifier = (searchParams.get('page') as PlatformIDs) || PlatformIDs.MAIN
+  const knownDevices = useClientStore((state) => state.knownDevices)
+  const knownDevice = findKnownDeviceForClient(client, knownDevices)
+  const displayName =
+    knownDevice?.displayName ||
+    client.manifest?.context.name ||
+    client.manifest?.name ||
+    client.clientId
 
   const setSelectedIdentifier = (identifier: PlatformIDs): void => {
     searchParams.set('page', identifier)
@@ -53,7 +61,10 @@ const ClientDetailsOverlay: React.FC<ClientDetailsOverlayProps> = ({ onClose, cl
                   : 'bg-red-500'
             }`}
           />
-          <h1 className="font-semibold text-2xl">Device {client.clientId}</h1>
+          <div className="min-w-0">
+            <h1 className="font-semibold text-2xl truncate">{displayName}</h1>
+            <p className="text-xs text-zinc-500 truncate">{client.clientId}</p>
+          </div>
         </div>{' '}
         <div className="flex flex-grow max-h-full overflow-hidden">
           <div className="border-r border-zinc-800 p-2 flex flex-col gap-2">

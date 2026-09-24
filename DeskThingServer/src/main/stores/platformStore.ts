@@ -37,6 +37,8 @@ import { ExtractPayloadFromIPC, PlatformIPC } from '@shared/types/ipc/ipcPlatfor
 import { progressBus } from '@server/services/events/progressBus'
 import { ProgressChannel } from '@shared/types'
 import { ClientIdentificationService } from '@server/services/clients/clientIdentificationService'
+import { DeviceRegistryStoreClass } from '@shared/stores/deviceRegistryStore'
+import { DeviceRegistryStore } from './deviceRegistryStore'
 
 export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements PlatformStoreClass {
   private platforms: Map<PlatformIDs, PlatformInterface> = new Map()
@@ -56,7 +58,8 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
   constructor(
     appStore: AppStoreClass,
     appDataStore: AppDataStoreClass,
-    mappingStore: MappingStoreClass
+    mappingStore: MappingStoreClass,
+    private deviceRegistryStore: DeviceRegistryStoreClass = new DeviceRegistryStore()
   ) {
     super()
     this.appStore = appStore
@@ -70,6 +73,7 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
   async initialize(): Promise<void> {
     if (this._initialized) return
     this._initialized = true
+    await this.deviceRegistryStore.initialize()
     this.appStore.initialize()
     this.setupListeners()
   }
@@ -306,6 +310,10 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
     }
   }
 
+  async dispose(): Promise<void> {
+    await Promise.all(Array.from(this.platforms.keys()).map((id) => this.stopPlatform(id)))
+  }
+
   async restartPlatform(
     platformId: PlatformIDs,
     options?: PlatformConnectionOptions
@@ -314,15 +322,18 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
     return await this.startPlatform(platformId, options)
   }
   getClients(): Client[] {
-    // Remove clients without any providers
-    for (const client of this.clientRegistry.values()) {
-      if (!client.primaryProviderId && !Object.values(client.identifiers).length) {
-        Logger.debug(`Removing client ${client.clientId} as it has no providers`, {
+    // Known devices are persisted separately; the runtime registry only exposes active providers.
+    for (const [registryId, client] of this.clientRegistry.entries()) {
+      const hasActiveProvider = Object.values(client.identifiers).some(
+        (identifier) => identifier.active
+      )
+      if (!hasActiveProvider) {
+        Logger.debug(`Removing client ${client.clientId} as it has no active providers`, {
           domain: 'platformStore',
           function: 'getClients',
           source: 'platformStore'
         })
-        this.clientRegistry.delete(client.clientId)
+        this.clientRegistry.delete(registryId)
       }
     }
 
@@ -330,13 +341,18 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
   }
 
   async fetchClients(): Promise<Client[]> {
-    const clients = await Promise.all(
-      Array.from(this.platforms.values()).map(async (platform) => await platform.fetchClients())
-    ).then((clientArrays) => clientArrays.flat())
-
-    const uniqueClients = Array.from(
-      new Map(clients.map((client) => [client.clientId, client])).values()
+    const platformClients = await Promise.all(
+      Array.from(this.platforms.values()).map(async (platform) => ({
+        platform,
+        clients: await platform.fetchClients()
+      }))
     )
+
+    for (const { platform, clients } of platformClients) {
+      for (const client of clients) this.handleClientUpdate(platform, client)
+    }
+
+    const uniqueClients = this.getClients()
 
     Logger.debug(`Fetched ${uniqueClients.length} clients`, {
       domain: 'platformStore',
@@ -392,6 +408,12 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
     const client = this.clientRegistry.get(clientId)
     if (client) return client
 
+    const knownDevice = this.deviceRegistryStore.getDevice(clientId)
+    if (knownDevice) {
+      const knownClient = this.clientRegistry.get(knownDevice.id)
+      if (knownClient) return knownClient
+    }
+
     // If not found, check if it's an identifier in any client
     for (const registeredClient of this.clientRegistry.values()) {
       for (const identifier of Object.values(registeredClient.identifiers)) {
@@ -425,7 +447,10 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
       return this.platforms.get(client.primaryProviderId as PlatformIDs)
     }
 
-    const platforms = this.clientPlatformMap.get(clientId)
+    const knownDeviceId = this.deviceRegistryStore.getDevice(clientId)?.id
+    const platforms =
+      this.clientPlatformMap.get(clientId) ??
+      (knownDeviceId ? this.clientPlatformMap.get(knownDeviceId) : undefined)
     if (platforms && platforms.size > 0) {
       // Return the first available platform
       for (const platformId of platforms) {
@@ -485,7 +510,8 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
       clientUpdates as Client
     )
     // Update the registry
-    this.clientRegistry.set(existingClient.clientId, updatedClient)
+    const knownDevice = this.deviceRegistryStore.registerClient(updatedClient)
+    this.clientRegistry.set(knownDevice.id, updatedClient)
 
     // Notify other platforms about the update
     this.platforms.forEach((p) => {
@@ -510,6 +536,7 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
   handleClientDisconnected = async (clientId: string, platformId: PlatformIDs): Promise<void> => {
     const client = this.getClientById(clientId)
     if (!client) return
+    const registryId = this.deviceRegistryStore.getDevice(clientId)?.id ?? client.clientId
 
     // Update the client's identifiers to mark this platform as inactive
     if (!client.identifiers[platformId]) {
@@ -526,16 +553,9 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
     const activeProviders = Object.values(client.identifiers).filter((id) => id.active)
 
     if (activeProviders.length === 0) {
-      // No active providers, mark client as disconnected
-      const updatedClient: Client = {
-        ...client,
-        connected: false,
-        connectionState: ConnectionState.Disconnected
-      }
-      delete updatedClient.primaryProviderId
-
-      // Update registry
-      this.clientRegistry.set(client.clientId, updatedClient)
+      // No active providers remain.
+      // Remove only the runtime session. Its name and identity remain in the known-device store.
+      this.clientRegistry.delete(registryId)
 
       // Emit disconnected event
       this.emit(PlatformStoreEvent.CLIENT_DISCONNECTED, client.clientId)
@@ -566,7 +586,7 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
       }
 
       // Update registry
-      this.clientRegistry.set(client.clientId, updatedClient)
+      this.clientRegistry.set(registryId, updatedClient)
 
       // Emit updated event
       this.emit(PlatformStoreEvent.CLIENT_UPDATED, updatedClient)
@@ -838,7 +858,11 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
     // Client List
     platform.on(PlatformEvent.CLIENT_LIST, (clients: Client[]) => {
       // Get all clients currently registered for this platform
-      const incomingClientIds = new Set(clients.map((client) => client.clientId))
+      const incomingClientIds = new Set(
+        clients
+          .flatMap((client) => [client.clientId, client.identifiers[platform.id]?.id])
+          .filter((id): id is string => Boolean(id))
+      )
 
       // Add or update clients from the incoming list
       for (const client of clients) {
@@ -846,29 +870,25 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
       }
 
       // Handle disconnections for clients not in the list
-      for (const [clientId, client] of this.clientRegistry.entries()) {
-        if (client.identifiers[platform.id]?.active && !incomingClientIds.has(clientId)) {
-          this.handleClientDisconnected(clientId, platform.id)
+      for (const client of this.clientRegistry.values()) {
+        const platformClientId = client.identifiers[platform.id]?.id
+        if (
+          client.identifiers[platform.id]?.active &&
+          platformClientId &&
+          !incomingClientIds.has(platformClientId)
+        ) {
+          this.handleClientDisconnected(platformClientId, platform.id)
         }
       }
     })
   }
 
   private handleClientUpdate(platform: PlatformInterface, client: Client): void {
-    // First, check if this client already exists in the registry
-    let existingClientId: string | undefined
-    let existingClient: Client | undefined
+    const knownDevice = this.deviceRegistryStore.registerClient(client)
+    const registryId = knownDevice.id
+    const existingClient = this.clientRegistry.get(registryId)
 
-    // Look for matching clients
-    for (const [id, registeredClient] of this.clientRegistry.entries()) {
-      if (ClientIdentificationService.isSameDevice(client, registeredClient)) {
-        existingClientId = id
-        existingClient = registeredClient
-        break
-      }
-    }
-
-    if (existingClient && existingClientId) {
+    if (existingClient) {
       // Client exists - update it
 
       // Check if the device is now connected
@@ -878,42 +898,21 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
       const mergedClient = ClientIdentificationService.mergeClients(existingClient, client)
 
       // Update the registry
-      this.clientRegistry.set(existingClientId, mergedClient)
+      this.clientRegistry.set(registryId, mergedClient)
 
-      if (client.clientId !== existingClientId) {
-        this.clientRegistry.set(client.clientId, mergedClient)
-
-        for (const platformId in mergedClient.identifiers) {
-          const identifier = mergedClient.identifiers[platformId]
-          if (identifier.id) {
-            this.addClientPlatformMapping(identifier.id, platform.id)
-          }
-        }
-        Logger.debug(
-          `Added additional registry entry for ${client.clientId} -> ${existingClientId}`,
-          {
-            domain: 'platform',
-            source: 'platformStore',
-            function: 'handleClientUpdate'
-          }
-        )
-      }
-
-      // Update the client-platform mappings for both IDs
-      this.addClientPlatformMapping(existingClientId, platform.id)
-      if (client.clientId !== existingClientId) {
-        this.addClientPlatformMapping(client.clientId, platform.id)
-      }
+      // Update the client-platform mappings for the canonical and provider IDs.
+      this.addClientPlatformMapping(registryId, platform.id)
+      this.addClientPlatformMapping(client.clientId, platform.id)
 
       // Add all identifiers to the platform map for easier lookup
       for (const identifier of Object.values(mergedClient.identifiers)) {
-        this.addClientPlatformMapping(identifier.id, platform.id)
+        this.addClientPlatformMapping(identifier.id, identifier.providerId as PlatformIDs)
       }
 
       this.platforms.forEach((p) => {
         // Only update other platforms that have this client
         if (Object.keys(mergedClient.identifiers).includes(p.id)) {
-          p.updateClient(existingClientId, mergedClient, false)
+          p.updateClient(mergedClient.clientId, mergedClient, false)
         }
       })
 
@@ -930,7 +929,7 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
         this.sendInitialDataToClient(mergedClient.clientId)
       }
 
-      Logger.debug(`Updated client ${client.clientId} (merged with ${existingClientId})`, {
+      Logger.debug(`Updated client ${client.clientId} (${registryId})`, {
         domain: 'platform',
         source: 'platformStore',
         function: 'handleClientUpdate'
@@ -942,12 +941,13 @@ export class PlatformStore extends EventEmitter<PlatformStoreEvents> implements 
         connectionState: client.connectionState
       }
 
-      this.clientRegistry.set(client.clientId, newClient)
+      this.clientRegistry.set(registryId, newClient)
+      this.addClientPlatformMapping(registryId, platform.id)
       this.addClientPlatformMapping(client.clientId, platform.id)
 
       // Add all identifiers to the platform map for easier lookup
       for (const identifier of Object.values(newClient.identifiers)) {
-        this.addClientPlatformMapping(identifier.id, platform.id)
+        this.addClientPlatformMapping(identifier.id, identifier.providerId as PlatformIDs)
       }
 
       // Emit the new client event

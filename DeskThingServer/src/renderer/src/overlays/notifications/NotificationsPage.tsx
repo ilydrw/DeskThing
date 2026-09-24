@@ -30,21 +30,21 @@ const NotificationItem: React.FC<NotificationProps> = ({ notification, onAcknowl
 
   return (
     <div
-      className={`relative border rounded-xl p-4 mb-4 transition-all duration-300
+      className={`relative border rounded-xl p-4 mb-3 transition-colors duration-150
         ${
           notification.type === 'error'
-            ? 'border-red-700 bg-gradient-to-br from-zinc-950 to-red-950 shadow-red-700/30'
+            ? 'border-red-800 bg-red-950/20'
             : notification.type === 'warning'
-              ? 'border-yellow-700 bg-gradient-to-br from-zinc-950 to-yellow-950 shadow-yellow-700/30'
+              ? 'border-yellow-800 bg-yellow-950/20'
               : notification.type === 'info'
-                ? 'border-blue-700 bg-gradient-to-br from-zinc-950 to-blue-950 shadow-blue-700/30'
+                ? 'border-blue-800 bg-blue-950/20'
                 : notification.type === 'acknowledge'
-                  ? 'border-emerald-700 bg-gradient-to-br from-zinc-950 to-emerald-950 shadow-emerald-700/30'
+                  ? 'border-emerald-800 bg-emerald-950/20'
                   : notification.type === 'confirm'
-                    ? 'border-emerald-400 bg-gradient-to-br from-zinc-950 to-emerald-950 shadow-emerald-400/30'
-                    : 'border-zinc-900 bg-zinc-950 shadow-zinc-900/20'
+                    ? 'border-emerald-700 bg-emerald-950/20'
+                    : 'border-zinc-800 bg-zinc-950/40'
         }
-        group hover:scale-[1.01] hover:-translate-y-0.5 m-1
+        group m-1
       `}
     >
       {showClose && (
@@ -57,7 +57,7 @@ const NotificationItem: React.FC<NotificationProps> = ({ notification, onAcknowl
         </button>
       )}
       <div
-        className="absolute top-2 left-2 px-2 py-0.5 text-xs font-semibold text-emerald-400 bg-zinc-900/80 rounded-full shadow-sm pointer-events-none select-none"
+        className="absolute top-2 left-2 px-2 py-0.5 text-xs font-medium text-emerald-400 bg-zinc-900 rounded-md pointer-events-none select-none"
         style={{
           maxWidth: '120px',
           overflow: 'hidden',

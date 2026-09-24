@@ -26,7 +26,8 @@ export function createClientWindow(port: number): BrowserWindow {
       height: 20
     },
     webPreferences: {
-      sandbox: false,
+      sandbox: true,
+      partition: 'persist:deskthing-client',
       contextIsolation: true,
       nodeIntegration: false
     }

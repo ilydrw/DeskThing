@@ -1,28 +1,29 @@
 import { HashRouter as Router, Route, Routes, Navigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 import Loading from '../components/Loading'
-import Clients from '@renderer/pages/Clients'
-import Apps from '@renderer/pages/Apps'
-import Downloads from '@renderer/pages/Downloads'
-import Dev from '@renderer/pages/Dev'
 import TopBar from './TopBar'
-import ClientMappingPage from '@renderer/pages/Clients/Mapping/'
-import AppsList from '@renderer/pages/Apps/AppsList'
 import PageDataListener from '@renderer/listeners/PageDataListener'
-import AppDownloads from '@renderer/pages/Downloads/AppDownloads'
-import ClientDownloads from '@renderer/pages/Downloads/ClientDownloads'
-import Logs from '@renderer/pages/Dev/Logs'
-import ClientConnections from '@renderer/pages/Clients/Connections'
 import OverlayWrapper from '@renderer/overlays/modals/OverlaysWrapper'
 import ServerRoutingListener from '@renderer/listeners/ServerRouteListener'
-import WelcomeWidget from '@renderer/pages/Dashboard/WelcomeWidget'
-import ADBSettings from '@renderer/pages/Dev/ADBSettings'
-import ClientTheming from '@renderer/pages/Clients/Theming'
-import ProfilesPage from '@renderer/pages/Clients/profiles'
 import ErrorBoundary from '@renderer/components/ErrorBoundary'
-import DevAppPage from '@renderer/pages/Dev/DevApp/DevAppPage'
+
+const Clients = lazy(() => import('@renderer/pages/Clients'))
+const Apps = lazy(() => import('@renderer/pages/Apps'))
+const Downloads = lazy(() => import('@renderer/pages/Downloads'))
+const Dev = lazy(() => import('@renderer/pages/Dev'))
+const ClientMappingPage = lazy(() => import('@renderer/pages/Clients/Mapping/'))
+const AppsList = lazy(() => import('@renderer/pages/Apps/AppsList'))
+const AppDownloads = lazy(() => import('@renderer/pages/Downloads/AppDownloads'))
+const ClientDownloads = lazy(() => import('@renderer/pages/Downloads/ClientDownloads'))
+const Logs = lazy(() => import('@renderer/pages/Dev/Logs'))
+const ClientConnections = lazy(() => import('@renderer/pages/Clients/Connections'))
+const WelcomeWidget = lazy(() => import('@renderer/pages/Dashboard/WelcomeWidget'))
+const ADBSettings = lazy(() => import('@renderer/pages/Dev/ADBSettings'))
+const ClientTheming = lazy(() => import('@renderer/pages/Clients/Theming'))
+const ProfilesPage = lazy(() => import('@renderer/pages/Clients/profiles'))
+const DevAppPage = lazy(() => import('@renderer/pages/Dev/DevApp/DevAppPage'))
 
 const AppRouter = (): JSX.Element => {
-
   return (
     <Router>
       <OverlayWrapper>
@@ -31,35 +32,37 @@ const AppRouter = (): JSX.Element => {
         <div className="flex flex-col h-full">
           <TopBar />
           <ErrorBoundary>
-            <Routes>
-              <Route path="/" element={<Loading />} />
-              <Route path="/da" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/do" element={<Navigate to="/downloads/client" replace />} />
-              <Route path="/de" element={<Navigate to="/developer/logs" replace />} />
-              <Route path="/cl" element={<Navigate to="/clients/connections" replace />} />
-              <Route path="/ap" element={<Navigate to="/apps/list" replace />} />
+            <Suspense fallback={<Loading message="Loading page..." />}>
+              <Routes>
+                <Route path="/" element={<Loading />} />
+                <Route path="/da" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/do" element={<Navigate to="/downloads/client" replace />} />
+                <Route path="/de" element={<Navigate to="/developer/logs" replace />} />
+                <Route path="/cl" element={<Navigate to="/clients/connections" replace />} />
+                <Route path="/ap" element={<Navigate to="/apps/list" replace />} />
 
-              <Route path="/dashboard" element={<WelcomeWidget />} />
-              <Route path="/clients" element={<Clients />}>
-                <Route path="mapping" element={<ClientMappingPage />} />
-                <Route path="theming" element={<ClientTheming />} />
-                <Route path="connections" element={<ClientConnections />} />
-                <Route path="Profiles" element={<ProfilesPage />} />
-              </Route>
-              <Route path="/apps" element={<Apps />}>
-                <Route path="list" element={<AppsList />} />
-              </Route>
-              <Route path="/downloads" element={<Downloads />}>
-                <Route path="app" element={<AppDownloads />} />
-                <Route path="client" element={<ClientDownloads />} />
-              </Route>
-              <Route path="/developer" element={<Dev />}>
-                <Route path="logs" element={<Logs />} />
-                <Route path="app" element={<DevAppPage />} />
-                <Route path="adb" element={<ADBSettings />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                <Route path="/dashboard" element={<WelcomeWidget />} />
+                <Route path="/clients" element={<Clients />}>
+                  <Route path="mapping" element={<ClientMappingPage />} />
+                  <Route path="theming" element={<ClientTheming />} />
+                  <Route path="connections" element={<ClientConnections />} />
+                  <Route path="Profiles" element={<ProfilesPage />} />
+                </Route>
+                <Route path="/apps" element={<Apps />}>
+                  <Route path="list" element={<AppsList />} />
+                </Route>
+                <Route path="/downloads" element={<Downloads />}>
+                  <Route path="app" element={<AppDownloads />} />
+                  <Route path="client" element={<ClientDownloads />} />
+                </Route>
+                <Route path="/developer" element={<Dev />}>
+                  <Route path="logs" element={<Logs />} />
+                  <Route path="app" element={<DevAppPage />} />
+                  <Route path="adb" element={<ADBSettings />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
           </ErrorBoundary>
         </div>
       </OverlayWrapper>

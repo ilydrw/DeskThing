@@ -3,11 +3,14 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { ReleaseStore } from '../../../src/main/stores/releaseStore'
 import {
   readAppReleaseData,
-  readClientReleaseData
+  readClientReleaseData,
+  saveAppReleaseData,
+  saveClientReleaseData
 } from '@server/services/files/releaseFileService'
+import { createReleaseFile } from '@server/services/releases/releaseUtils'
 import Logger from '@server/utils/logger'
 import { ClientReleaseFile01111 } from '@shared/types'
-import {  ClientLatestJSON } from '@deskthing/types'
+import { ClientLatestJSON } from '@deskthing/types'
 
 vi.mock('@server/services/files/releaseFileService')
 vi.mock('@server/services/events/progressBus')
@@ -80,6 +83,29 @@ describe('ReleaseStore', () => {
   })
 
   describe('Release Data Management', () => {
+    it('creates empty release files on first run without treating them as read errors', async () => {
+      vi.mocked(readAppReleaseData).mockResolvedValueOnce(undefined)
+      vi.mocked(readClientReleaseData).mockResolvedValueOnce(undefined)
+      vi.mocked(createReleaseFile).mockImplementation(
+        async (type: 'app' | 'client') =>
+          ({
+            releases: [],
+            repositories: [],
+            timestamp: 0,
+            type,
+            version: '0.11.11'
+          }) as any
+      )
+
+      await releaseStore.refreshData()
+
+      expect(vi.mocked(createReleaseFile)).toHaveBeenCalledWith('app', undefined)
+      expect(vi.mocked(createReleaseFile)).toHaveBeenCalledWith('client', undefined)
+      expect(vi.mocked(saveAppReleaseData)).toHaveBeenCalled()
+      expect(vi.mocked(saveClientReleaseData)).toHaveBeenCalled()
+      expect(vi.mocked(Logger.warn)).not.toHaveBeenCalled()
+    })
+
     it('should get app releases', async () => {
       const mockReleases = {
         releases: [{ id: 'test-app' }],
@@ -113,8 +139,6 @@ describe('ReleaseStore', () => {
       const releases = await releaseStore.getClientReleases()
       expect(releases).toEqual(mockReleases.releases)
     })
-
-
     it('should get specific client release', async () => {
       const mockReleases = {
         releases: [{ id: 'test-client' }],

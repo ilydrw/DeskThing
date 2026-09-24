@@ -1,206 +1,150 @@
-// Types
 import { Settings, CacheableStore } from '@shared/types'
-import {
-  SettingsListener,
-  SettingsStoreClass,
-  SettingsStoreListener
-} from '@shared/stores/settingsStore'
-
-// Utils
+import { SettingsListener, SettingsStoreClass, SettingsStoreListener } from '@shared/stores/settingsStore'
 import { readFromFile, writeToFile } from '../services/files/fileService'
 import Logger from '@server/utils/logger'
-import semverSatisfies from 'semver/functions/satisfies.js'
 import { defaultSettings } from '@server/static/defaultSettings'
 import { app } from 'electron/main'
+import { assertRecord, isRecord, isSettingValue, normalizeSettings } from '@shared/validation/settings'
 
-const LAST_SETTINGS_UPDATE = '0.11.11'
+const STATS_CONSENT_VERSION = 1
 
 export class SettingsStore implements CacheableStore, SettingsStoreClass {
   private settings: Settings | undefined
-  private settingsFilePath: string = 'settings.json'
+  private settingsFilePath = 'settings.json'
   private globalListeners: SettingsListener[] = []
+  private _initialized = false
+  private initialization?: Promise<void>
+  private pendingSave: Promise<void> = Promise.resolve()
 
-  private _initialized: boolean = false
-  public get initialized(): boolean {
-    return this._initialized
-  }
+  public get initialized(): boolean { return this._initialized }
 
   async initialize(): Promise<void> {
     if (this._initialized) return
-    this._initialized = true
-    this.setupSettings()
+    this.initialization ??= this.loadSettings().then((settings) => {
+      this.settings = settings
+      this._initialized = true
+    }).finally(() => { this.initialization = undefined })
+    await this.initialization
   }
 
-  /**
-   * @implements CacheableStore
-   */
   clearCache = async (): Promise<void> => {
-    // do nothing
+    // Settings stay resident because connection and logging services depend on them.
   }
 
-  /**
-   * @implements CacheableStore
-   */
-  saveToFile = async (): Promise<void> => {
-    await this.saveSettings()
-  }
+  saveToFile = async (): Promise<void> => { await this.saveSettings() }
 
-  private setupSettings = async (): Promise<void> => {
-    const settings = await this.loadSettings()
-    this.settings = settings
-  }
-
-  private notifyListeners = async (): Promise<void> => {
+  private async notifyListeners(): Promise<void> {
     if (!this.settings) return
-    this.globalListeners.forEach(async (listener) => {
+    const snapshot = structuredClone(this.settings)
+    await Promise.all(this.globalListeners.map(async (listener) => {
       try {
-        if (!this.settings) return
-        await listener(this.settings)
+        await listener(structuredClone(snapshot))
       } catch (error) {
-        Logger.error('Error in notifyListeners', {
-          source: 'settingsStore',
-          function: 'notifyListeners',
-          error: error as Error
+        Logger.error('Settings listener failed', {
+          source: 'settingsStore', function: 'notifyListeners', error: error as Error
         })
       }
-    })
+    }))
   }
 
-  /**
-   * Saves the current settings to file. Emits an update if settings are passed
-   * @param settings - Overrides the current settings with the passed settings if passed
-   */
   public async saveSettings(settings?: Settings): Promise<void> {
-    try {
-      if (settings) {
-        this.settings = settings
-      }
-
-      await writeToFile(this.settings, this.settingsFilePath)
-      Logger.debug('SETTINGS: Updated settings!' + JSON.stringify(this.settings), {
-        source: 'settingsStore',
-        function: 'saveSettings'
-      })
-      this.notifyListeners()
-    } catch (err) {
-      Logger.error('Unable to save settings!', {
-        source: 'settingsStore',
-        function: 'saveSettings',
-        error: err as Error
-      })
-    }
+    const snapshot = settings ? normalizeSettings(settings, defaultSettings) : undefined
+    await this.updateSettings((current) => snapshot ?? current)
   }
 
-  /**
-   *
-   * @returns Returns the default settings for the application
-   */
-  private getDefaultSettings(): Settings {
-    return { ...defaultSettings }
+  private async updateSettings(update: (current: Settings) => Settings): Promise<void> {
+    const saved = this.pendingSave.then(async () => {
+      await this.initialize()
+      const next = update(structuredClone(this.settings ?? defaultSettings))
+      await writeToFile(next, this.settingsFilePath)
+      // Do not announce or commit a setting that could not be saved.
+      this.settings = next
+    })
+    this.pendingSave = saved.catch(() => undefined)
+    await saved
+    await this.notifyListeners()
   }
 
-  /**
-   * Loads the application settings from a file. If the file does not exist or the
-   * version code is outdated, it creates a new file with the default settings.
-   * If the `autoStart` setting is defined, it also updates the auto-launch
-   * configuration.
-   *
-   * @returns The loaded settings, or the default settings if the file could not be
-   * loaded.
-   */
   private async loadSettings(): Promise<Settings> {
+    let stored: unknown
     try {
-      const data = await readFromFile<Settings>(this.settingsFilePath)
-      Logger.debug('Loaded Settings!', {
-        source: 'settingStore',
-        function: 'loadSettings'
+      stored = await readFromFile<unknown>(this.settingsFilePath, assertRecord)
+    } catch (error) {
+      Logger.warn('Unable to read settings; using defaults in memory without overwriting the file', {
+        source: 'settingsStore', function: 'loadSettings', error: error as Error
       })
-
-      if (!data || !data.version || !semverSatisfies(data.version, '>=' + LAST_SETTINGS_UPDATE)) {
-        // File does not exist, create it with default settings
-        console.log('Unable to find settings. ', data)
-        const defaultSettings = this.getDefaultSettings()
-        await writeToFile(defaultSettings, this.settingsFilePath)
-        console.log('SETTINGS: Returning default settings')
-        return defaultSettings
-      }
-
-      data.version = app.getVersion()
-
-      return data
-    } catch (err) {
-      console.error('Error loading settings:', err)
-
-      const defaultSettings = this.getDefaultSettings()
-
-      writeToFile(defaultSettings, this.settingsFilePath)
-
-      return defaultSettings
+      return structuredClone(defaultSettings)
     }
+
+    const data = normalizeSettings(stored, defaultSettings)
+    data.version = app.getVersion()
+    if (!isRecord(stored) || stored.privacy_statsConsentVersion !== STATS_CONSENT_VERSION) {
+      data.flag_collectStats = false
+      data.privacy_statsConsentVersion = STATS_CONSENT_VERSION
+    }
+    if (JSON.stringify(stored) !== JSON.stringify(data)) {
+      try {
+        await writeToFile(data, this.settingsFilePath)
+      } catch (error) {
+        Logger.warn('Unable to persist migrated settings; retaining usable settings in memory', {
+          source: 'settingsStore', function: 'loadSettings', error: error as Error
+        })
+      }
+    }
+    return data
   }
 
   public getSettings = async (): Promise<Settings> => {
-    if (this.settings) {
-      return this.settings
-    }
-    return this.loadSettings()
+    await this.initialize()
+    return structuredClone(this.settings ?? defaultSettings)
   }
 
-  public getSetting = async <K extends keyof Settings>(
-    key: K
-  ): Promise<Settings[K] | undefined> => {
-    const settings = await this.getSettings()
-    return settings[key]
+  public getSetting = async <K extends keyof Settings>(key: K): Promise<Settings[K] | undefined> => {
+    return (await this.getSettings())[key]
   }
 
   public addSettingsListener(listener: SettingsListener): () => void {
     this.globalListeners.push(listener)
-    return () => {
-      this.globalListeners = this.globalListeners.filter((l) => l !== listener)
-    }
+    return () => { this.globalListeners = this.globalListeners.filter((l) => l !== listener) }
   }
 
   public on<K extends keyof Settings>(key: K, listener: SettingsStoreListener<K>): () => void {
     let currentSetting = this.settings?.[key]
-
-    const remove = this.addSettingsListener(async (settings) => {
-      // Ensures the new setting is not the same as it was before - unless it is a reference
-      if (settings[key] === currentSetting && typeof currentSetting != 'object') return
-
+    return this.addSettingsListener(async (settings) => {
+      if (settings[key] === currentSetting && typeof currentSetting !== 'object') return
       currentSetting = settings[key]
       await listener(settings[key])
     })
-
-    return remove
   }
 
-  /**
-   * Updates a specific setting and saves it to file
-   * @param key - The key of the setting to update
-   * @param value - The new value for the setting
-   */
   public async saveSetting<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
-    const settings = await this.getSettings()
-    settings[key] = value
-    await this.saveSettings(settings)
+    if (!isSettingValue(key, value)) throw new Error('Invalid value for setting ' + key)
+    const snapshot = structuredClone(value)
+    await this.updateSettings((settings) => {
+      settings[key] = snapshot
+      return settings
+    })
   }
 
   public async setFlag(flag: string, value: boolean): Promise<void> {
-    const settings = await this.getSettings()
-    settings.flag_misc = settings.flag_misc || {}
-    settings.flag_misc[flag] = value
-    await this.saveSettings(settings)
+    if (typeof flag !== 'string' || !flag || typeof value !== 'boolean') throw new Error('Invalid flag')
+    await this.updateSettings((settings) => ({
+      ...settings, flag_misc: { ...settings.flag_misc, [flag]: value }
+    }))
   }
+
   public async toggleFlag(flagId: string): Promise<boolean> {
-    const settings = await this.getSettings()
-    settings.flag_misc = settings.flag_misc || {}
-    const currentValue = settings.flag_misc[flagId] || false
-    settings.flag_misc[flagId] = !currentValue
-    await this.saveSettings(settings)
-    return !currentValue
+    if (typeof flagId !== 'string' || !flagId) throw new Error('Invalid flag')
+    let next = false
+    await this.updateSettings((settings) => {
+      next = !(Object.hasOwn(settings.flag_misc ?? {}, flagId) && settings.flag_misc?.[flagId])
+      return { ...settings, flag_misc: { ...settings.flag_misc, [flagId]: next } }
+    })
+    return next
   }
+
   public async getFlag(flagId: string): Promise<boolean> {
-    const settings = await this.getSettings()
-    return settings.flag_misc?.[flagId] || false
+    const flags = (await this.getSettings()).flag_misc
+    return flags && Object.hasOwn(flags, flagId) ? flags[flagId] === true : false
   }
 }

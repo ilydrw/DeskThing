@@ -5,7 +5,7 @@ import { BrowserWindow, shell, Menu, MenuItem } from 'electron'
 import { join } from 'node:path'
 import icon from '../../../resources/icon.png?asset'
 import { handleUrl } from '../system/protocol'
-import { getMainWindow } from './windowManager'
+import { isRendererUrl, isSafeExternalUrl, trustRenderer } from './rendererSecurity'
 
 // Add context menu support
 const setupContextMenu = (window: BrowserWindow): void => {
@@ -101,9 +101,17 @@ export function createMainWindow(): BrowserWindow {
     ...(process.platform === 'linux' ? { icon: icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
       sandbox: false
     }
   })
+
+  trustRenderer(window.webContents)
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isRendererUrl(url)) event.preventDefault()
+  })
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
   // Set up Content Security Policy
   window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -111,7 +119,7 @@ export function createMainWindow(): BrowserWindow {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: deskthing: http://localhost:* https://thingify.tools https://*.thingify.tools https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com https://thingify.tools;"
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: deskthing: http://localhost:* https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com;"
         ]
       }
     })
@@ -122,23 +130,17 @@ export function createMainWindow(): BrowserWindow {
     window.show()
   })
 
-  // Clean up reference when window is closed
-  window.on('closed', async () => {
-    const mainWindow = getMainWindow()
-    if (mainWindow === window) {
-      mainWindow.destroy()
-    }
-  })
-
   // Handle new window creation attempts
   window.webContents.setWindowOpenHandler((details) => {
     // Handle internal protocol links
     if (details.url.startsWith('deskthing://')) {
-      handleUrl(details.url)
+      void handleUrl(details.url).catch((error) => console.error('Failed to handle application link', error))
       return { action: 'deny' }
     } else {
       // Open external links in default browser
-      shell.openExternal(details.url)
+      if (isSafeExternalUrl(details.url)) {
+        void shell.openExternal(details.url).catch((error) => console.error('Failed to open external link', error))
+      }
       return { action: 'deny' }
     }
   })

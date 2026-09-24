@@ -1,4 +1,4 @@
-import { IconArrowRight, IconLink, IconLoading, IconX } from '@renderer/assets/icons'
+import { IconArrowRight, IconLoading, IconX } from '@renderer/assets/icons'
 import Button from '@renderer/components/Button'
 import useUpdateStore from '@renderer/stores/updateStore'
 import { UpdateProgressType } from '@shared/types'
@@ -88,15 +88,9 @@ const UpdateOverlay: React.FC = () => {
             </div>
           )}
           {update.failed ? (
-            <div className="flex gap-2 justify-between">
-              <Button
-                className="rounded-lg border border-green-500 gap-2 hover:bg-green-500 hover:text-white"
-                href="https://deskthing.app/releases"
-                target="_blank"
-              >
-                <p>Download From Site</p>
-                <IconLink />
-              </Button>
+            <div className="max-w-xs text-sm text-zinc-400">
+              Automatic update failed. Download the latest build from the repository that
+              distributed this version.
             </div>
           ) : update.updateDownloaded ? (
             <Button

@@ -28,10 +28,11 @@ export const releases = {
       type: IPC_RELEASE_TYPES.ADD_REPOSITORY,
       payload: repoUrl
     }),
-  getAllRepositories: async (): Promise<GithubRepository[]> => await sendCommand({
-    kind: IPC_HANDLERS.RELEASE,
-    type: IPC_RELEASE_TYPES.GET_REPO_ASSETS
-  }),
+  getAllRepositories: async (): Promise<GithubRepository[]> =>
+    await sendCommand({
+      kind: IPC_HANDLERS.RELEASE,
+      type: IPC_RELEASE_TYPES.GET_REPO_ASSETS
+    }),
   getApps: async (): Promise<AppLatestServer[]> =>
     await sendCommand({
       kind: IPC_HANDLERS.RELEASE,

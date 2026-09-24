@@ -78,7 +78,7 @@ export class ClientStore
       function: 'ClientStore.saveToFile',
       source: 'client-store'
     })
-    updateManifest(this._client)
+    await updateManifest(this._client)
   }
 
   /**
@@ -225,11 +225,7 @@ export class ClientStore
       // TODO: Validate client
 
       if (!client) {
-        progressBus.error(
-          ProgressChannel.ST_CLIENT_REFRESH,
-          'Refresh Client',
-          'Client is not valid'
-        )
+        progressBus.warn(ProgressChannel.ST_CLIENT_REFRESH, 'No device client is installed')
         return null
       }
 

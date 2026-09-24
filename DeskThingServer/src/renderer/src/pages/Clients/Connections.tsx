@@ -4,6 +4,7 @@ import { useClientStore, usePageStore, useSettingsStore } from '@renderer/stores
 import Button from '@renderer/components/Button'
 import {
   IconDownload,
+  IconCarThingSmall,
   IconLink,
   IconPlus,
   IconQR,
@@ -16,6 +17,7 @@ import ConnectionComponent from '@renderer/components/Client/Connection'
 import { useSearchParams } from 'react-router-dom'
 import { ProgressChannel } from '@shared/types'
 import { useChannelProgress } from '@renderer/hooks/useProgress'
+import PageHeader from '@renderer/components/PageHeader'
 
 const ClientConnections: React.FC = () => {
   const settings = useSettingsStore((settings) => settings.settings)
@@ -37,6 +39,7 @@ const ClientConnections: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [refreshCount, setRefreshCount] = useState(0)
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0)
 
@@ -64,15 +67,17 @@ const ClientConnections: React.FC = () => {
   const handleRefresh = async (): Promise<void> => {
     if (!isRefreshing) {
       setIsRefreshing(true)
-      const res = await refreshConnections()
-      console.log('Found', res)
-      setTimeout(
-        () => {
-          setIsRefreshing(false)
-          setRefreshCount((prevCount) => prevCount + 1)
-        },
-        Math.random() * 1200 + 300
-      )
+      setActionError(null)
+      try {
+        if (!(await refreshConnections())) {
+          setActionError('Could not refresh devices. Check your connection and try again.')
+        }
+      } catch {
+        setActionError('Could not refresh devices. Check your connection and try again.')
+      } finally {
+        setIsRefreshing(false)
+        setRefreshCount((prevCount) => prevCount + 1)
+      }
     }
   }
 
@@ -94,36 +99,55 @@ const ClientConnections: React.FC = () => {
   }
 
   const handleRestartServerClick = async (): Promise<void> => {
+    if (isRestarting) return
     setIsRestarting(true)
-    await window.electron.utility.restartServer()
-    setTimeout(() => {
+    setActionError(null)
+    try {
+      await window.electron.utility.restartServer()
+    } catch {
+      setActionError('Could not restart the server. Check the logs and try again.')
+    } finally {
       setIsRestarting(false)
-    }, 1000)
+    }
   }
 
   const handleRefreshData = async (): Promise<void> => {
     if (!isRefreshing) {
       setIsRefreshing(true)
-      await refreshClient()
-      setTimeout(
-        () => {
-          setIsRefreshing(false)
-        },
-        Math.random() * 2000 + 1500
-      )
+      setActionError(null)
+      try {
+        await refreshClient()
+      } catch {
+        setActionError('Could not read device software. Try again or open Downloads.')
+      } finally {
+        setIsRefreshing(false)
+      }
     }
   }
 
   const handleDownloadLatest = async (): Promise<void> => {
+    if (isDownloading) return
     setIsDownloading(true)
-    await downloadLatestClient()
-    await refreshClient()
-    setIsDownloading(false)
+    setActionError(null)
+    try {
+      await downloadLatestClient()
+      if (!(await refreshClient())) {
+        setActionError(
+          'No device software was installed. Open Downloads to add a trusted client repository or import a client ZIP.'
+        )
+      }
+    } catch {
+      setActionError(
+        'Could not download device software. Check your connection or import a client ZIP from Downloads.'
+      )
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   return (
     <div className="flex h-full w-full">
-      <Sidebar className="flex justify-between flex-col h-full md:items-stretch xs:items-center">
+      <Sidebar>
         <div>
           <div className="md:block xs:hidden block">
             {settings.flag_nerd &&
@@ -134,20 +158,25 @@ const ClientConnections: React.FC = () => {
                 </div>
               ))}
 
-            <div className="border-t border-gray-500 mt-4 pt-4">
+            <div className="mt-2 rounded-xl border border-white/5 bg-white/[0.025] p-3">
               {clientManifest ? (
                 <>
-                  <p className="">Staged Client</p>
-                  <p className="text-gray-500">{clientManifest.name}</p>
-                  <p className="text-gray-500">Version: {clientManifest.version}</p>
+                  <p className="page-eyebrow !mb-2">Staged client</p>
+                  <p className="text-sm font-medium text-slate-200">{clientManifest.name}</p>
+                  <p className="mt-1 font-geistMono text-[10px] text-slate-600">
+                    v{clientManifest.version}
+                  </p>
                 </>
               ) : (
                 <div className="flex flex-col items-center gap-2">
-                  <p className="text-red-500 font-semibold text-center">No Client Found!</p>
-                  <div className="flex justify-around w-full md:flex-row flex-col bg-red-900 rounded-full">
+                  <span className="connection-pill-dot !bg-amber-300 !shadow-[0_0_12px_rgba(252,211,77,0.6)]" />
+                  <p className="text-xs font-medium text-slate-400 text-center">
+                    Client package missing
+                  </p>
+                  <div className="flex justify-around w-full md:flex-row flex-col rounded-lg bg-black/20">
                     <Button
                       onClick={handleRefreshData}
-                      className="hover:font-semibold hover:bg-red-800 rounded-3xl group"
+                      className="group justify-center hover:bg-white/5"
                       title="Refresh Client"
                       disabled={isRefreshing}
                     >
@@ -160,7 +189,7 @@ const ClientConnections: React.FC = () => {
                       disabled={isDownloading}
                       onClick={handleDownloadLatest}
                       title="Download Latest"
-                      className="hover:font-semibold hover:bg-red-800 rounded-3xl group"
+                      className="group justify-center hover:bg-white/5"
                     >
                       <IconDownload
                         strokeWidth={1.5}
@@ -173,7 +202,7 @@ const ClientConnections: React.FC = () => {
             </div>
           </div>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1">
           <Button
             title="Go to Downloads Page"
             onClick={handleDownloadsNav}
@@ -186,6 +215,7 @@ const ClientConnections: React.FC = () => {
             <Button
               className={`hover:bg-zinc-900 ${isRestarting ? 'cursor-not-allowed opacity-50' : ''}`}
               onClick={handleRestartServerClick}
+              disabled={isRestarting}
               title="Restart the server"
             >
               <IconReload
@@ -200,37 +230,76 @@ const ClientConnections: React.FC = () => {
         </div>
       </Sidebar>
       <MainElement>
-        <div className="flex flex-col gap-2 p-4">
-          <div className="w-full p-4 border rounded-xl border-zinc-900 flex gap-4 justify-between bg-zinc-950">
-            <Button className="border-gray-500 gap-2 w-full hover:bg-zinc-900" onClick={openQr}>
-              <IconQR />
-              <p className="md:block hidden text-center flex-grow">QR Code</p>
-            </Button>
-            <Button
-              className={`border-gray-500 w-full hover:bg-zinc-900 gap-2 ${isRefreshing ? 'cursor-not-allowed opacity-50' : ''}`}
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              ref={refreshRef}
-            >
-              <IconRefresh strokeWidth={1.5} className={isRefreshing ? 'animate-spin' : ''} />
-              <p className="md:block hidden text-center flex-grow">
-                {isRefreshing ? 'Searching...' : 'Refresh'}
+        <div className="page-scroll">
+          <div className="page-frame">
+            <PageHeader
+              eyebrow="Devices"
+              title="Devices"
+              description="Connect and manage DeskThing displays."
+              actions={
+                <>
+                  <Button className="action-button" onClick={openQr} title="Show pairing QR code">
+                    <IconQR />
+                    <span className="hidden sm:inline">Pair with QR</span>
+                  </Button>
+                  <Button
+                    className="action-button"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    ref={refreshRef}
+                  >
+                    <IconRefresh strokeWidth={1.5} className={isRefreshing ? 'animate-spin' : ''} />
+                    <span className="hidden sm:inline">
+                      {isRefreshing ? 'Searching' : 'Refresh'}
+                    </span>
+                  </Button>
+                  <Button className="action-button action-button-primary" onClick={openSetup}>
+                    <IconPlus strokeWidth={2} iconSize={22} />
+                    <span>Add device</span>
+                  </Button>
+                </>
+              }
+            />
+
+            {actionError && (
+              <p
+                role="alert"
+                className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm text-amber-200"
+              >
+                {actionError}
               </p>
-            </Button>
-            <Button
-              className={`border-gray-500 w-full group gap-2 border hover:bg-zinc-900 border-transparent`}
-              onClick={openSetup}
-            >
-              <IconPlus strokeWidth={2} iconSize={28} />
-              <p className="md:block hidden text-center flex-grow">Add Device</p>
-            </Button>
-          </div>
-          <div className="font-geistMono w-full h-full items-center flex flex-col gap-2 justify-center">
+            )}
+
             {clients.length > 0 ? (
-              clients.map((client) => <ConnectionComponent key={client.clientId} client={client} />)
+              <div className="flex flex-col gap-3">
+                {clients.map((client) => (
+                  <ConnectionComponent key={client.clientId} client={client} />
+                ))}
+              </div>
             ) : (
-              <div className="first-letter:">
-                <p>{deviceMessages[currentMessageIndex].message}</p>
+              <div className="empty-state">
+                <div className="max-w-md">
+                  <div className="empty-state-icon">
+                    <IconCarThingSmall iconSize={36} />
+                  </div>
+                  <h2 className="text-xl font-semibold tracking-tight text-slate-100">
+                    No devices yet
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-zinc-500">
+                    {deviceMessages[currentMessageIndex].message} Pair a display to install apps and
+                    manage it from this server.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <Button className="action-button action-button-primary" onClick={openSetup}>
+                      <IconPlus iconSize={20} />
+                      Add your first device
+                    </Button>
+                    <Button className="action-button" onClick={openQr}>
+                      <IconQR iconSize={20} />
+                      Show QR
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

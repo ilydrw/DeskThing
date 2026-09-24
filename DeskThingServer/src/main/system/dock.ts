@@ -9,6 +9,8 @@ import { getMainWindow, getClientWindow, buildMainWindow } from '../windows/wind
  */
 export async function setupDock(): Promise<void> {
   if (process.platform !== 'darwin') return
+  const dock = app.dock
+  if (!dock) return
 
   // Create dock context menu
   const contextMenu = Menu.buildFromTemplate([
@@ -52,7 +54,7 @@ export async function setupDock(): Promise<void> {
     {
       label: 'Hide Tray Icon',
       click: (): void => {
-        app.dock.hide()
+        dock.hide()
       }
     },
     {
@@ -65,5 +67,5 @@ export async function setupDock(): Promise<void> {
     }
   ])
 
-  app.dock.setMenu(contextMenu)
+  dock.setMenu(contextMenu)
 }

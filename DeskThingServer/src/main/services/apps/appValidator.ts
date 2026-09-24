@@ -20,7 +20,7 @@ import {
   TagTypes,
   AppLatestJSONLatest,
   SettingsFile,
-  CommonSetting 
+  CommonSetting
 } from '@deskthing/types'
 import { AppData, LegacyAppData } from '@shared/types'
 
@@ -31,6 +31,7 @@ import Logger from '@server/utils/logger'
 import { isValidTask } from '../task'
 import { isValidAction, isValidKey } from '../mappings/mapsValidation'
 import { statSync } from 'node:fs'
+import { assertSafePathSegment } from '@server/utils/pathSecurity'
 
 /**
  * Validates a setting.
@@ -160,7 +161,7 @@ export const sanitizeSettings: (setting: Partial<SettingsType>) => SettingsType 
       setting = {
         ...commonSettings,
         type: SETTING_TYPES.BOOLEAN,
-        value: setting.value,
+        value: setting.value
       } as SettingsBoolean
       break
     case SETTING_TYPES.STRING:
@@ -248,21 +249,19 @@ export const verifyAppInstanceStructure: (
   apps?: unknown | AppData | LegacyAppData
 ) => asserts apps is AppData = (apps) => {
   if (!apps) throw new Error('[verifyAppInstanceStructure] Apps do not exist or is not defined')
-  if (typeof apps != 'object') throw new Error('[verifyAppInstanceStructure] Apps is not an object')
+  if (typeof apps != 'object' || Array.isArray(apps)) throw new Error('[verifyAppInstanceStructure] Apps is not an object')
 
   // Only old structures should have apps and config
   if ('apps' in apps && 'config' in apps) {
     Logger.log(LOGGING_LEVELS.WARN, 'App Data outdated. Updating...')
     const oldApps = apps as LegacyAppData
+    if (!Array.isArray(oldApps.apps)) throw new Error('Legacy apps must be an array')
     oldApps.apps.forEach((app) => {
       try {
         sanitizeAppStructure(app)
         apps[app.name] = app
       } catch (error) {
-        handleError(
-          error,
-          `[verifyAppDataStructure]: App ${app?.name || 'unknown'} had issue being verified`
-        )
+        throw new Error('Invalid legacy app entry', { cause: error })
       }
     })
     delete apps.apps
@@ -270,21 +269,13 @@ export const verifyAppInstanceStructure: (
   } else {
     Object.entries(apps).forEach(([appId, app]) => {
       try {
+        assertSafePathSegment(appId, 'App identifier')
         sanitizeAppStructure(app as Partial<App>)
         apps[appId] = app
       } catch (error) {
-        handleError(error, `[verifyAppDataStructure]: App ${appId} had issue being verified`)
+        throw new Error(`Invalid app entry ${appId}`, { cause: error })
       }
     })
-  }
-}
-
-const handleError = (error: unknown | Error, message: string): void => {
-  if (error instanceof Error) {
-    Logger.log(LOGGING_LEVELS.ERROR, message + ' ' + error.message)
-  } else {
-    Logger.log(LOGGING_LEVELS.ERROR, message + ' ' + error)
-    console.error(error)
   }
 }
 
@@ -294,32 +285,38 @@ const handleError = (error: unknown | Error, message: string): void => {
  * @param app - The app to verify
  */
 export const isValidAppDataInterface: (
-  app: Partial<AppDataInterface>
+  app: unknown
 ) => asserts app is AppDataInterface = (app) => {
   if (!app) {
     throw new Error('App data interface is undefined')
   }
-  if (typeof app !== 'object') {
+  if (typeof app !== 'object' || Array.isArray(app)) {
     throw new Error('App data interface is not an object')
   }
-  if (!app.version) {
+  if (!('version' in app) || typeof app.version !== 'string' || !app.version) {
     throw new Error('App data interface version is undefined')
   }
-  if (app.settings) {
-    isValidAppSettings(app.settings)
+  const value = app as AppDataInterface
+  for (const field of ['data', 'settings', 'tasks', 'actions', 'keys'] as const) {
+    if (field in app && (value[field] === null || typeof value[field] !== 'object' || Array.isArray(value[field]))) {
+      if (value[field] !== undefined) throw new Error(`App ${field} must be an object`)
+    }
   }
-  if (app.tasks) {
-    Object.values(app.tasks).forEach((task) => {
+  if (value.settings) {
+    isValidAppSettings(value.settings)
+  }
+  if (value.tasks) {
+    Object.values(value.tasks).forEach((task) => {
       isValidTask(task)
     })
   }
-  if (app.actions) {
-    Object.values(app.actions).forEach((action) => {
+  if (value.actions) {
+    Object.values(value.actions).forEach((action) => {
       isValidAction(action)
     })
   }
-  if (app.keys) {
-    Object.values(app.keys).forEach((key) => {
+  if (value.keys) {
+    Object.values(value.keys).forEach((key) => {
       isValidKey(key)
     })
   }
@@ -344,7 +341,7 @@ export const sanitizeAppDataInterface: (
  * @param app Potentially partial app
  */
 export const sanitizeAppStructure: (app: Partial<App>) => asserts app is App = (app) => {
-  if (typeof app != 'object') {
+  if (!app || typeof app != 'object' || Array.isArray(app)) {
     throw new Error('App is not an object!')
   }
 
@@ -355,6 +352,7 @@ export const sanitizeAppStructure: (app: Partial<App>) => asserts app is App = (
       throw new Error('App does not have a name! ' + JSON.stringify(app))
     }
   }
+  assertSafePathSegment(app.name, 'App identifier')
 
   app.enabled = app.enabled ?? false
   app.running = app.running ?? false
@@ -403,6 +401,9 @@ export const sanitizeAppMeta: (
  * Constructs the app's manifest and fills in any information that may be missing
  */
 export const constructManifest = (manifestData?: Partial<AppManifest>): AppManifest => {
+  const manifestId = manifestData?.id || 'unknown'
+  assertSafePathSegment(manifestId, 'App manifest identifier')
+
   const getTags = (): TagTypes[] => {
     return [
       ...(manifestData?.tags || []),
@@ -415,7 +416,7 @@ export const constructManifest = (manifestData?: Partial<AppManifest>): AppManif
 
   const returnData: AppManifest = {
     ...manifestData, // ensures that any additional fields are preserved
-    id: manifestData?.id || 'unknown',
+    id: manifestId,
     requires: manifestData?.requires || [],
     label: manifestData?.label || 'Unknown App',
     version: manifestData?.version || '0.0.0',

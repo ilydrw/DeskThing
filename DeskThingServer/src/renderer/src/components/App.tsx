@@ -38,17 +38,21 @@ const App: React.FC<AppProps> = ({ app, activeRequest }) => {
   }
 
   return (
-    <div className="flex items-center bg-zinc-950 border-neutral-900 border p-4 justify-between rounded-xl text-neutral-200">
-      <div className="flex items-center gap-4">
+    <div className="app-row flex items-center border p-3.5 justify-between rounded-xl text-neutral-200 transition-colors duration-150">
+      <div className="flex items-center gap-3.5">
         <IconGrip className="text-gray-300 -mx-3 cursor-grab md:block hidden" />
-        <div className="w-12 h-12 flex-shrink-0">
+        <div className="w-11 h-11 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
           <AppIcon className="w-full h-full text-neutral-200 fill-neutral-200" appId={app.name} />
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="font-geist font-semibold">{app.manifest?.label || app.name}</h2>
+            <h2 className="font-geist font-semibold tracking-tight text-slate-100">
+              {app.manifest?.label || app.name}
+            </h2>
             {app.manifest?.version && (
-              <p className="text-xs text-gray-500 font-geistMono italic">{app.manifest.version}</p>
+              <p className="rounded-md border border-zinc-800 bg-zinc-950/40 px-1.5 py-0.5 text-[10px] text-zinc-500 font-geistMono">
+                v{app.manifest.version}
+              </p>
             )}
           </div>
           {is_nerd && (
@@ -86,7 +90,7 @@ const App: React.FC<AppProps> = ({ app, activeRequest }) => {
         {activeRequest && (
           <Button
             title="Handle data request"
-            className="bg-cyan-950 border-cyan-900 border hover:bg-cyan-600 items-center justify-center gap-1 sm:gap-2 rounded-full px-2 sm:px-4 py-1.5 sm:py-2 shadow-lg hover:shadow-cyan-500/20 transition-all duration-200"
+            className="action-button action-button-primary items-center justify-center gap-1 sm:gap-2"
             onClick={showAppRequests}
           >
             <IconPulsing />
@@ -99,7 +103,7 @@ const App: React.FC<AppProps> = ({ app, activeRequest }) => {
         <Button
           title="App Settings"
           onClick={showAppDetails}
-          className={`bg-slate-950 hover:bg-slate-800 items-center justify-center gap-1 sm:gap-2 rounded-full px-2 sm:px-4 py-1.5 sm:py-2 shadow-lg hover:shadow-slate-800/20 transition-all duration-200 ${app.meta?.updateAvailable ? 'border md:border-0 border-emerald-500 hover:bg-emerald-600' : 'border border-slate-900'}`}
+          className={`action-button items-center justify-center gap-1 sm:gap-2 ${app.meta?.updateAvailable ? '!border-emerald-500/40 !text-emerald-300' : ''}`}
         >
           {app.meta?.updateAvailable ? (
             <div className="flex gap-2 items-center">
@@ -119,7 +123,7 @@ const App: React.FC<AppProps> = ({ app, activeRequest }) => {
         {app.running ? (
           <Button
             title="Pause App"
-            className="bg-amber-950 border border-amber-900 hover:bg-amber-500 items-center justify-center gap-1 sm:gap-2 rounded-full px-2 sm:px-4 py-1.5 sm:py-2 shadow-lg hover:shadow-amber-500/20 transition-all duration-200"
+            className="action-button !border-amber-400/20 !text-amber-200 items-center justify-center gap-1 sm:gap-2"
             onClick={() => stopApp(app.name)}
           >
             <p className="text-xs hidden md:block lg:text-base font-medium">Pause</p>
@@ -128,7 +132,7 @@ const App: React.FC<AppProps> = ({ app, activeRequest }) => {
         ) : (
           <Button
             title="Run App"
-            className="bg-cyan-950 border-cyan-900 border hover:bg-cyan-600 items-center justify-center gap-1 sm:gap-2 rounded-full px-2 sm:px-4 py-1.5 sm:py-2 shadow-lg hover:shadow-cyan-500/20 transition-all duration-200"
+            className="action-button action-button-primary items-center justify-center gap-1 sm:gap-2"
             onClick={() => runApp(app.name)}
           >
             <p className="text-xs hidden md:block lg:text-base font-medium">Run</p>

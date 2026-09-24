@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --dt-bg: #0f1012;
+  --dt-bg-elevated: #111214;
+  --dt-surface: #16171a;
+  --dt-surface-hover: #1b1c20;
+  --dt-surface-strong: #202126;
+  --dt-border: #2a2c31;
+  --dt-border-strong: #3a3d43;
+  --dt-text: #f2f3f5;
+  --dt-muted: #969ba4;
+  --dt-subtle: #656a73;
+  --dt-accent: #18d66f;
+  --dt-accent-hover: #22e37a;
+}
+
 @font-face {
   font-family: 'TheBoldFont';
   src: url('./fonts/THEBOLDFONT.ttf') format('truetype');
@@ -18,6 +36,44 @@
     src: url('./fonts/GeistVF.ttf') format('truetype');
   }
 }
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--dt-bg);
+    color: var(--dt-text);
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--dt-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    color: #07160d;
+    background: var(--dt-accent);
+  }
+}
 @layer base {
   @font-face {
     font-family: 'GeistMono';
@@ -29,7 +85,8 @@
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 /* Track */
@@ -40,11 +97,15 @@
 
 /* Handle */
 ::-webkit-scrollbar-thumb {
-  background: rgb(51, 65, 85);
-  border-radius: 5px;
+  background: #44474e;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
 }
 
 /* Handle on hover */
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #5b5f67;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }

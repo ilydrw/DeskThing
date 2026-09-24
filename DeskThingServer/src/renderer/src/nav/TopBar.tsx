@@ -1,29 +1,43 @@
 import React from 'react'
 import Nav from './Nav'
-import { IconLogo, IconWifi } from '@renderer/assets/icons'
+import { IconLogoGear, IconWifi } from '@renderer/assets/icons'
 import { useClientStore } from '@renderer/stores'
 
 const TopBar: React.FC = () => {
   const connections = useClientStore((state) => state.connections)
   const version = process.env.PACKAGE_VERSION
   return (
-    <div className="bg-neutral-950 border-neutral-900 border-b text-neutral-300 flex items-center justify-between">
-      <div className="flex items-center p-4 min-w-24 md:min-w-48">
-        {connections == 0 ? (
-          <IconWifi className="text-neutral-300" iconSize={24} />
-        ) : (
-          <div className="text-green-500 flex">
-            <p className="text-xs">{connections == 1 ? '' : connections}</p>
-            <IconWifi className="" iconSize={24} />
-          </div>
-        )}
-        <IconLogo width={110} height={30} iconSize={50} className={'hidden md:inline'} />
-        <p className="text-sm hidden md:inline">v{version}</p>
+    <header className="topbar-shell">
+      <div className="topbar-brand">
+        <div className="topbar-brand-mark">
+          <IconLogoGear iconSize={22} />
+        </div>
+        <strong className="topbar-wordmark">DeskThing</strong>
       </div>
-      <div className="w-full">
+      <div className="min-w-0 w-full">
         <Nav />
       </div>
-    </div>
+      <div className="topbar-status">
+        <div
+          className="connection-pill"
+          title={`${connections} connected device${connections === 1 ? '' : 's'}`}
+        >
+          <span
+            className={`connection-pill-dot ${connections === 0 ? '!bg-amber-300 !shadow-none' : ''}`}
+          />
+          <span className="connection-pill-label">
+            {connections > 0 ? `${connections} connected` : 'No devices connected'}
+          </span>
+          <IconWifi
+            className={connections > 0 ? 'text-emerald-400' : 'text-zinc-600'}
+            iconSize={16}
+          />
+        </div>
+        <span className="version-pill hidden xl:inline font-geistMono text-[10px] text-slate-600">
+          v{version}
+        </span>
+      </div>
+    </header>
   )
 }
 

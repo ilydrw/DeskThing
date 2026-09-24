@@ -1,74 +1,148 @@
-import React, { useState, useEffect } from 'react'
-import { IconCarThingSmall, IconDiscord, IconLink, IconYoutube } from '@renderer/assets/icons'
+import React from 'react'
+import {
+  IconConnected,
+  IconDownload,
+  IconLayoutgrid,
+  IconLightning,
+  IconLink,
+  IconLogoGear,
+  IconWifi
+} from '@renderer/assets/icons'
 import Button from '@renderer/components/Button'
 import { useNavigate } from 'react-router-dom'
-import Lottie from 'lottie-react'
-import landingAnimation from '@renderer/assets/animations/Landing Animation-v2.json'
+import { useAppStore, useClientStore } from '@renderer/stores'
 
 const WelcomeWidget: React.FC = () => {
-  const [showText, setShowText] = useState(false)
   const navigate = useNavigate()
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowText(true)
-    }, 1000)
-
-    return () => clearTimeout(timer)
-  }, [])
+  const connections = useClientStore((state) => state.connections)
+  const clientManifest = useClientStore((state) => state.clientManifest)
+  const initialized = useClientStore((state) => state.initialized)
+  const installedApps = useAppStore((state) => state.appsList.length)
+  const version = process.env.PACKAGE_VERSION
 
   return (
-    <div className="h-full relative overflow-hidden">
-      <div className="w-full h-full flex flex-col justify-center items-center">
-        <div className="flex gap-2 px-28 sm:px-0 sm:w-[500px] items-center justify-center">
-          <Lottie animationData={landingAnimation} loop={false} />
-        </div>
-        <div className="flex justify-between gap-4 mt-5">
-          <Button
-            onClick={() => window.open('https://deskthing.app/discord', '_blank')}
-            className={`delay-100 text-sm items-center border-[#5865f2] border gap-1 hover:bg-[#5865F2] group hover:text-white transition-[transform,opacity] duration-500 overflow-hidden text-nowrap ${showText ? 'opacity-100' : '-translate-y-10 opacity-0'}`}
-          >
-            <IconDiscord className="as fill-[#5865f2] group-hover:fill-white" color={'red'} />
-            <p className="group-hover:hidden">Join the Community</p>
-            <p className="group-hover:inline hidden ml-2">DeskThing Discord</p>
-          </Button>
-          <Button
-            onClick={() => window.open('https://deskthing.app/youtube', '_blank')}
-            className={`delay-200 text-sm items-center border-[#ff0033] border gap-1 hover:bg-[#ff0033] group hover:text-white transition-[transform,opacity] duration-500 overflow-hidden text-nowrap ${showText ? 'opacity-100' : '-translate-y-10 opacity-0'}`}
-          >
-            <IconYoutube className="fill-[#ff0033] group-hover:fill-white" />
-            <p className="group-hover:hidden">Youtube</p>
-            <p className="group-hover:inline hidden">Youtube</p>
-          </Button>
-          <Button
-            onClick={() => window.open('https://deskthing.app/releases', '_blank')}
-            className={`delay-300 text-sm items-center border-cyan-500 border gap-1 hover:bg-cyan-500 group hover:text-white transition-[transform,opacity] duration-500 overflow-hidden text-nowrap ${showText ? 'opacity-100' : '-translate-y-10 opacity-0'}`}
-          >
-            <IconCarThingSmall
-              className="group-hover:hidden fill-cyan-500 group-hover:fill-white"
-              strokeWidth={1.5}
+    <div className="dashboard-page">
+      <div className="dashboard-frame">
+        <header className="dashboard-header">
+          <div>
+            <p className="page-eyebrow">DeskThing</p>
+            <h1 className="page-title">Dashboard</h1>
+            <p className="page-description">Manage devices, apps, and server status.</p>
+          </div>
+          <div className="page-header-actions">
+            <Button onClick={() => navigate('/downloads/app')} className="action-button">
+              <IconDownload />
+              Browse apps
+            </Button>
+            <Button
+              onClick={() => navigate('/clients/connections')}
+              className="action-button action-button-primary"
+            >
+              <IconConnected className="fill-current" />
+              Add device
+            </Button>
+          </div>
+        </header>
+
+        <section
+          className="dashboard-status"
+          aria-label="Device connection status"
+          aria-live="polite"
+        >
+          <div className="dashboard-status-main">
+            <span className="dashboard-status-icon">
+              <IconLogoGear iconSize={22} />
+            </span>
+            <div>
+              <p className="dashboard-status-title">
+                {!initialized
+                  ? 'Loading devices'
+                  : connections > 0
+                    ? 'Device connected'
+                    : 'No connected devices'}
+              </p>
+              <p className="dashboard-status-detail">
+                {connections === 0
+                  ? 'Open Devices to connect a display or troubleshoot its connection.'
+                  : `${connections} device${connections === 1 ? '' : 's'} connected`}
+              </p>
+            </div>
+          </div>
+          <span className={`dashboard-status-badge ${connections === 0 ? '!text-amber-300' : ''}`}>
+            <span
+              className={`connection-pill-dot ${connections === 0 ? '!bg-amber-300 !shadow-none' : ''}`}
             />
-            <IconLink
-              className="group-hover:inline hidden fill-cyan-500 group-hover:fill-white"
-              strokeWidth={1.5}
-            />
-            <p className="group-hover:hidden">Whats New?</p>
-            <p className="group-hover:inline hidden">Release Notes</p>
-          </Button>
-          <Button
+            {connections > 0 ? 'Connected' : 'Not connected'}
+          </span>
+        </section>
+
+        {initialized && !clientManifest && (
+          <section className="dashboard-status" aria-label="Set up device software">
+            <div>
+              <h2 className="dashboard-status-title">Install device software first</h2>
+              <p className="dashboard-status-detail">
+                Your display needs a DeskThing client. Open device software to add a trusted client
+                repository or import a client ZIP, then connect your display from Devices.
+              </p>
+            </div>
+            <Button className="action-button" onClick={() => navigate('/downloads/client')}>
+              Device software
+            </Button>
+          </section>
+        )}
+
+        <section className="dashboard-grid" aria-label="DeskThing overview">
+          <button
+            type="button"
+            className="dashboard-card"
+            onClick={() => navigate('/clients/connections')}
+          >
+            <span className="dashboard-card-icon">
+              <IconWifi iconSize={18} />
+            </span>
+            <strong className="dashboard-metric">{connections}</strong>
+            <span className="dashboard-card-label">
+              {connections === 1 ? 'Connected device' : 'Connected devices'}
+            </span>
+          </button>
+
+          <button type="button" className="dashboard-card" onClick={() => navigate('/apps/list')}>
+            <span className="dashboard-card-icon">
+              <IconLayoutgrid iconSize={18} />
+            </span>
+            <strong className="dashboard-metric">{installedApps}</strong>
+            <span className="dashboard-card-label">
+              {installedApps === 1 ? 'Installed app' : 'Installed apps'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="dashboard-card"
+            onClick={() => navigate('/downloads/client')}
+          >
+            <span className="dashboard-card-icon">
+              <IconLightning iconSize={18} />
+            </span>
+            <strong className="dashboard-metric">Client</strong>
+            <span className="dashboard-card-label">Manage device software</span>
+          </button>
+
+          <button
+            type="button"
+            className="dashboard-card"
             onClick={() => navigate('?notifications=true&page=task')}
-            className={`delay-500 text-sm bg-zinc-900 hover:bg-zinc-800 items-center gap-2 transition-[opacity,transform] duration-500 overflow-hidden text-nowrap ${showText ? 'opacity-100' : '-translate-y-10 opacity-0'}`}
           >
-            Get Started
-            <IconLink />
-          </Button>
-        </div>
-        <div className="text-gray-500 fixed bottom-0 px-5 w-screen flex justify-between items-between">
-          <p className="animate-fade">Built by Riprod</p>
-          <p className="animate-fade">UI design by TheBigLoud</p>
-        </div>
+            <span className="dashboard-card-icon">
+              <IconLink iconSize={18} />
+            </span>
+            <strong className="dashboard-metric">v{version}</strong>
+            <span className="dashboard-card-label">Current server version</span>
+          </button>
+        </section>
       </div>
     </div>
   )
 }
+
 export default WelcomeWidget

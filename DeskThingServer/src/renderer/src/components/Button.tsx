@@ -37,7 +37,8 @@ const Button: React.FC<ButtonProps> = ({
   onMouseDown,
   ...props
 }) => {
-  const baseClasses = 'relative group flex-row flex p-3 hover:font-semibold rounded-md'
+  const baseClasses =
+    'desk-button relative group flex flex-row rounded-lg px-3 py-2 disabled:pointer-events-none'
   const combinedClasses = `${baseClasses} ${className}`
 
   if (href) {

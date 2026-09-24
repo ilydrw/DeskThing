@@ -28,6 +28,7 @@ import { ThingifyStoreClass } from '@shared/stores/thingifyStore'
 import { StatsCollector } from './statsCollectionStore'
 import { NotificationStoreClass } from '@shared/stores/notificationStore'
 import { TimeStoreClass } from '@shared/stores/timeStoreClass'
+import { DeviceRegistryStoreClass } from '@shared/stores/deviceRegistryStore'
 
 interface Stores {
   appDataStore: AppDataStoreClass
@@ -53,6 +54,7 @@ interface Stores {
   statsCollector: StatsCollector
   timeStore: TimeStoreClass
   notificationStore: NotificationStoreClass
+  deviceRegistryStore: DeviceRegistryStoreClass
 }
 
 export class StoreProvider {
@@ -64,11 +66,15 @@ export class StoreProvider {
     [K in keyof Stores]: () => Promise<Stores[K]>
   }
   private initialized = false
+  private initialization?: Promise<void>
+  private constructing = new Map<keyof Stores, Promise<void>>()
+  private initializing = new Map<keyof Stores, Promise<void>>()
 
   private constructor() {
     const storeImports = {
       appDataStore: () => import('./appDataStore').then((m) => m.AppDataStore),
       notificationStore: () => import('./notificationStore').then((m) => m.NotificationStore),
+      deviceRegistryStore: () => import('./deviceRegistryStore').then((m) => m.DeviceRegistryStore),
       appStore: () => import('./appStore').then((m) => m.AppStore),
       authStore: () => import('./authStore').then((m) => m.AuthStore),
       releaseStore: () => import('./releaseStore').then((m) => m.ReleaseStore),
@@ -99,6 +105,7 @@ export class StoreProvider {
         new (await storeImports.authStore())(await this.getStore('settingsStore', false)),
       releaseStore: async () => new (await storeImports.releaseStore())(),
       notificationStore: async () => new (await storeImports.notificationStore())(),
+      deviceRegistryStore: async () => new (await storeImports.deviceRegistryStore())(),
       appStore: async () =>
         new (await storeImports.appStore())(
           await this.getStore('appProcessStore', false),
@@ -112,7 +119,8 @@ export class StoreProvider {
         new (await storeImports.platformStore())(
           await this.getStore('appStore', false),
           await this.getStore('appDataStore', false),
-          await this.getStore('mappingStore', false)
+          await this.getStore('mappingStore', false),
+          await this.getStore('deviceRegistryStore', false)
         ),
       taskStore: async () =>
         new (await storeImports.taskStore())(
@@ -149,20 +157,26 @@ export class StoreProvider {
       timeStore: async () =>
         new (await storeImports.timeStore())(await this.getStore('platformStore', false)),
       statsCollector: async () =>
-        new (await storeImports.statsCollector())(await this.getStore('statsStore', false))
+        new (await storeImports.statsCollector())(
+          await this.getStore('statsStore', false),
+          await this.getStore('settingsStore', false)
+        )
     }
 
-    this.initialize()
+    void this.initialize().catch((error) => {
+      logger.error('Unable to initialize settings for logging', {
+        source: 'storeProvider', function: 'initialize', error: error as Error
+      })
+    })
   }
 
   public async initialize(): Promise<void> {
     if (this.initialized) return
-    const settingStore = await this.getStore('settingsStore')
-    logger.setupSettingsListener(settingStore)
-    logger.info('Initialized initial stores', {
-      function: 'initializeInitialStores',
-      source: 'storeProvider'
-    })
+    this.initialization ??= this.getStore('settingsStore').then(async (settingStore) => {
+      await logger.setupSettingsListener(settingStore)
+      this.initialized = true
+    }).finally(() => { this.initialization = undefined })
+    await this.initialization
   }
 
   public static getInstance(): StoreProvider {
@@ -176,26 +190,37 @@ export class StoreProvider {
     storeName: K,
     initialize = true
   ): Promise<Stores[K]> {
-    // Lazy initialize store only when requested
-    if (!this.storeInstances[storeName]) {
-      this.storeInstances[storeName] = await this.storeInitializers[storeName]()
-
-      // Specifically handle the appDataStore loop
-      if (storeName == 'appDataStore') {
-        const appDataStore = this.storeInstances[storeName] as Stores['appDataStore']
-        appDataStore.setupListeners(await this.getStore('taskStore', false))
+    let store = this.storeInstances[storeName]
+    if (!store) {
+      let constructing = this.constructing.get(storeName)
+      if (!constructing) {
+        constructing = this.storeInitializers[storeName]().then(async (created) => {
+        // Wire the back-reference only once the task store's dependencies exist.
+        if (storeName === 'taskStore') {
+          const appDataStore = await this.getStore('appDataStore', false)
+          await appDataStore.setupListeners(created as Stores['taskStore'])
+        }
+        this.storeInstances[storeName] = created
+        }).finally(() => { this.constructing.delete(storeName) })
+        this.constructing.set(storeName, constructing)
       }
+      await constructing
+      store = this.storeInstances[storeName]
     }
+    if (!store) throw new Error(`Store construction did not produce ${storeName}`)
 
-    if (!this.storeInstances[storeName].initialized && initialize) {
-      // Ensure the store is initialized before returning it
-      logger.info(`Initializing ${storeName}`, {
-        function: 'getStore',
-        source: 'storeProvider'
-      })
-      await this.storeInstances[storeName].initialize()
+    if (initialize) {
+      let initializing = this.initializing.get(storeName)
+      if (!initializing && !store.initialized) {
+        const instance = store
+        initializing = Promise.resolve().then(() => instance.initialize()).finally(() => {
+          this.initializing.delete(storeName)
+        })
+        this.initializing.set(storeName, initializing)
+      }
+      if (initializing) await initializing
     }
-    return this.storeInstances[storeName] as Stores[K]
+    return store
   }
 
   public async clearAllCaches(): Promise<void> {
@@ -204,6 +229,18 @@ export class StoreProvider {
         'clearCache' in store ? store.clearCache() : Promise.resolve()
       )
     )
+  }
+
+  public async collectShutdownStats(): Promise<void> {
+    await this.storeInstances.statsCollector?.collectSessionCloseStats()
+  }
+
+  public async dispose(): Promise<void> {
+    const results = await Promise.allSettled(Object.values(this.storeInstances).map(async (store) => {
+      await store.dispose?.()
+    }))
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Service cleanup failed')
   }
 
   public async saveAllToFile(): Promise<void> {

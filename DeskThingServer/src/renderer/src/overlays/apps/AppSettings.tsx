@@ -226,7 +226,7 @@ const AppSettings: React.FC<AppSettingProps> = ({ app }) => {
           <h2>No settings found ¯\_(ツ)_/¯</h2>
           <Button
             disabled={loading}
-            className="group gap-2 border-cyan-500 border m-5 enabled:hover:bg-cyan-500"
+            className="group gap-2 border-emerald-600 border m-5 enabled:hover:bg-emerald-600"
             onClick={refreshAppSettings}
           >
             <p className="">Refresh Settings</p>

@@ -4,6 +4,7 @@ import { LOGGING_LEVELS, APP_REQUESTS, DESKTHING_EVENTS } from '@deskthing/types
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { PlatformStoreEvent } from '@shared/stores/platformStore'
 import { uiEventBus } from '../events/uiBus'
+import { DEVICE_REGISTRY_UPDATED } from '@shared/stores/deviceRegistryStore'
 
 export async function initializeStores(): Promise<void> {
   const { default: cacheManager } = await import('./cacheManager')
@@ -32,6 +33,7 @@ export async function initializeStores(): Promise<void> {
     thingifyStore: await storeProvider.getStore('thingifyStore', false),
     flashStore: await storeProvider.getStore('flashStore', false),
     notificationStore: await storeProvider.getStore('notificationStore', false),
+    deviceRegistryStore: await storeProvider.getStore('deviceRegistryStore', true),
     statsCollector: await storeProvider.getStore('statsCollector', true)
   }
 
@@ -199,6 +201,13 @@ export async function initializeStores(): Promise<void> {
     uiEventBus.sendIpcData({
       type: 'staged-manifest',
       payload: client
+    })
+  })
+
+  storeList.deviceRegistryStore.on(DEVICE_REGISTRY_UPDATED, (devices) => {
+    uiEventBus.sendIpcData({
+      type: 'known-devices',
+      payload: devices
     })
   })
 

@@ -1,7 +1,7 @@
 import { ProgressEvent } from './progress'
 
 /**
- * What is emitted during the download from thingify.tools
+ * What is emitted during a firmware download
  */
 export type ThingifyArchiveDownloadEvent = ProgressEvent
 
@@ -17,7 +17,7 @@ export type ThingifyArchiveDownloadResult = {
 }
 
 /**
- * https://thingify.tools/api/v1/firmware
+ * A Thingify-compatible `/firmware` response
  */
 export type ThingifyApiFirmware = {
   id: string
@@ -27,13 +27,13 @@ export type ThingifyApiFirmware = {
   createdAt: number | null
   updatedAt: number | null
   /**
-   * https://thingify.tools/api/v1/firmware/
+   * Firmware catalog identifier
    *
    * The total number of downloads
    */
   totalDownloads?: number
   /**
-   * https://thingify.tools/api/v1/firmware/[id]
+   * Firmware catalog version entries
    *
    * The array of versions
    */
@@ -41,7 +41,7 @@ export type ThingifyApiFirmware = {
 }
 
 /**
- * https://thingify.tools/api/v1/firmware/[id]
+ * A Thingify-compatible firmware version response
  *
  * Inside {@link ThingifyApiFirmware.versions}
  */

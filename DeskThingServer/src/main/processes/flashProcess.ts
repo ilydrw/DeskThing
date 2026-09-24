@@ -7,10 +7,11 @@ type QueueFunction = () => Promise<void>
 
 process.title = 'Flash'
 
-class FlashWorker {
+export class FlashWorker {
   private flashThing: FlashThing | null = null
   private queue: QueueFunction[] = []
   private processing: boolean = false
+  private archiveReady = false
 
   constructor() {
     this.initialize()
@@ -41,7 +42,7 @@ class FlashWorker {
 
   private pushQueue(task: QueueFunction): void {
     this.queue.push(task)
-    this.processQueue()
+    void this.processQueue()
   }
 
   private processQueue = async (): Promise<void> => {
@@ -51,26 +52,19 @@ class FlashWorker {
     }
     this.processing = true
 
-    // stop processing the queue
-    if (this.queue.length === 0) {
+    try {
+      while (this.queue.length) {
+        const task = this.queue.shift()
+        if (task) await task()
+      }
+    } catch (error) {
+      // Do not run dependent flash commands after an archive or device operation failed.
+      this.queue = []
+      this.archiveReady = false
+      console.error('Flash operation failed:', error)
+      this.sendToParent({ type: 'operation', request: 'killed' })
+    } finally {
       this.processing = false
-      return
-    }
-
-    if (!this.flashThing) {
-      console.log('Creating a new flash thing because the last one is undefined')
-      this.createFlashThing()
-    }
-
-    const task = this.queue.shift()
-    if (task) {
-      await task()
-      this.processing = false
-      this.processQueue()
-    } else {
-      console.log('Queue is empty!')
-      this.processing = false
-      this.processQueue() // will loop again - and may just exit
     }
   }
 
@@ -81,26 +75,15 @@ class FlashWorker {
       switch (operation) {
         case 'start':
           this.pushQueue(async () => {
-            const result = await this.flashThing
-              ?.flash()
-              .catch(() => false)
-              .then(() => true)
-            if (result) {
-              this.sendToParent({
-                type: 'operation',
-                request: 'complete'
-              })
-            } else {
-              this.sendToParent({
-                type: 'operation',
-                request: 'killed'
-              })
-            }
+            if (!this.flashThing || !this.archiveReady) throw new Error('No usable firmware archive is loaded')
+            await this.flashThing.flash()
+            this.sendToParent({ type: 'operation', request: 'complete' })
           })
           break
         case 'unbrick':
           this.pushQueue(async () => {
-            await this.flashThing?.unbrick()
+            if (!this.flashThing) throw new Error('FlashThing is unavailable')
+            await this.flashThing.unbrick()
           })
           break
         default:
@@ -147,12 +130,10 @@ class FlashWorker {
         case 'response':
           if (message.request === FLASH_REQUEST.FILE_PATH) {
             this.pushQueue(async () => {
-              console.debug(`Opening archive ${message.payload}`)
-              try {
-                await this.flashThing?.openStockArchive(message.payload)
-              } catch (error) {
-                console.error(`Error opening archive: ${error}`)
-              }
+              this.archiveReady = false
+              if (!this.flashThing) throw new Error('FlashThing is unavailable')
+              await this.flashThing.openStockArchive(message.payload)
+              this.archiveReady = true
             })
           } else if (message.request === FLASH_REQUEST.DEVICE_SELECTION) {
             //  Not implemented yet

@@ -169,6 +169,36 @@ export class ReleaseStore
    * Public Methods
    */
 
+  private createInitialAppReleaseFile = async (force?: boolean): Promise<void> => {
+    this.appReleases = await createReleaseFile('app', force)
+    if (this.appReleases.releases.length === 0) {
+      const { appsRepo } = await import('../static/releaseMetadata')
+      if (appsRepo) {
+        await this.addRepositoryUrl(appsRepo)
+      }
+    }
+    await this.saveAppReleaseFile(false)
+    progressBus.complete(
+      ProgressChannel.ST_RELEASE_APP_REFRESH,
+      'Finished creating initial app release file'
+    )
+  }
+
+  private createInitialClientReleaseFile = async (force?: boolean): Promise<void> => {
+    this.clientReleases = await createReleaseFile('client', force)
+    if (this.clientReleases.releases.length === 0) {
+      const { clientRepo } = await import('../static/releaseMetadata')
+      if (clientRepo) {
+        await this.addRepositoryUrl(clientRepo)
+      }
+    }
+    await this.saveClientReleaseFile(false)
+    progressBus.complete(
+      ProgressChannel.ST_RELEASE_CLIENT_REFRESH,
+      'Finished creating initial client release file'
+    )
+  }
+
   /**
    * Gets the app and client releases from file, checks if their cache is valid, and updates them if they're not
    * @param force - If true, will force a refresh even if the cache is valid
@@ -215,9 +245,13 @@ export class ReleaseStore
     try {
       const appReleases = await this.getAppReleaseFile()
 
-      // Check if we need to refresh the app releases
       if (!appReleases) {
-        throw new Error('AppReleases is undefined!')
+        progressBus.update(
+          ProgressChannel.ST_RELEASE_APP_REFRESH,
+          'Creating the initial app release file'
+        )
+        await this.createInitialAppReleaseFile(force)
+        return
       }
 
       // Handle refreshing the existing data
@@ -230,7 +264,9 @@ export class ReleaseStore
         if (this.appReleases.releases.length == 0) {
           // This is a pretty worst-case scenario, but if the release file is empty, we should add the default repositories
           const { appsRepo } = await import('../static/releaseMetadata')
-          await this.addRepositoryUrl(appsRepo)
+          if (appsRepo) {
+            await this.addRepositoryUrl(appsRepo)
+          }
         }
 
         await this.saveAppReleaseFile(false)
@@ -251,17 +287,7 @@ export class ReleaseStore
         ProgressChannel.ST_RELEASE_APP_REFRESH,
         `Fetching initial app file because ${handleError(error)}`
       )
-      this.appReleases = await createReleaseFile('app', force)
-      if (this.appReleases.releases.length == 0) {
-        // This is a pretty worst-case scenario, but if the release file is empty, we should add the default repositories
-        const { appsRepo } = await import('../static/releaseMetadata')
-        await this.addRepositoryUrl(appsRepo)
-      }
-      await this.saveAppReleaseFile(false)
-      progressBus.complete(
-        ProgressChannel.ST_RELEASE_APP_REFRESH,
-        'Finished fetching initial app release file'
-      )
+      await this.createInitialAppReleaseFile(force)
       return
     }
   }
@@ -282,9 +308,13 @@ export class ReleaseStore
     try {
       const clientReleases = await this.getClientReleaseFile()
 
-      // Check if we need to refresh the app releases
       if (!clientReleases) {
-        throw new Error('ClientReleases is undefined!')
+        progressBus.update(
+          ProgressChannel.ST_RELEASE_CLIENT_REFRESH,
+          'Creating the initial client release file'
+        )
+        await this.createInitialClientReleaseFile(force)
+        return
       }
 
       // Handle refreshing the existing data
@@ -297,7 +327,9 @@ export class ReleaseStore
         if (this.clientReleases.releases.length == 0) {
           // This is a pretty worst-case scenario, but if the release file is empty, we should add the default repositories
           const { clientRepo } = await import('../static/releaseMetadata')
-          await this.addRepositoryUrl(clientRepo)
+          if (clientRepo) {
+            await this.addRepositoryUrl(clientRepo)
+          }
         }
         await this.saveClientReleaseFile(false)
         progressBus.complete(
@@ -317,17 +349,7 @@ export class ReleaseStore
         ProgressChannel.ST_RELEASE_CLIENT_REFRESH,
         `Fetching initial client file because ${handleError(error)}`
       )
-      this.clientReleases = await createReleaseFile('client', force)
-      if (this.clientReleases.releases.length == 0) {
-        // This is a pretty worst-case scenario, but if the release file is empty, we should add the default repositories
-        const { clientRepo } = await import('../static/releaseMetadata')
-        await this.addRepositoryUrl(clientRepo)
-      }
-      await this.saveClientReleaseFile(false)
-      progressBus.complete(
-        ProgressChannel.ST_RELEASE_CLIENT_REFRESH,
-        'Finished fetching initial clientReleases release file'
-      )
+      await this.createInitialClientReleaseFile(force)
       return
     }
   }

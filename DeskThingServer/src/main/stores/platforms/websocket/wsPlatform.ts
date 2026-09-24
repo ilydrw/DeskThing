@@ -23,6 +23,7 @@ import EventEmitter from 'node:events'
 import { PlatformIPC } from '@shared/types/ipc/ipcPlatform'
 import { progressBus } from '@server/services/events/progressBus'
 import { ProgressChannel } from '@shared/types'
+import { randomUUID } from 'node:crypto'
 
 export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements PlatformInterface {
   private worker: Worker | null = null
@@ -30,6 +31,9 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
   private startTime: number = 0
   private clients: Client[] = []
   private options: PlatformConnectionOptions | undefined = undefined
+  private restartTimer: NodeJS.Timeout | null = null
+  private restartAttempt = 0
+  private restarting = false
 
   readonly identifier: Omit<ClientIdentifier, 'id' | 'active'> = {
     providerId: PlatformIDs.WEBSOCKET,
@@ -42,8 +46,14 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
     this.setupWorker()
   }
 
-  private setupWorker = async (): Promise<void> => {
-    if (this.worker) this.worker?.terminate()
+  private setupWorker = (): void => {
+    const previousWorker = this.worker
+    if (previousWorker) {
+      previousWorker.removeAllListeners()
+      previousWorker.stdout?.removeAllListeners()
+      previousWorker.stderr?.removeAllListeners()
+      void previousWorker.terminate()
+    }
 
     this.worker = new Worker(wsPath, {
       workerData: { userDataPath: app.getPath('userData'), stdout: true, stderr: true },
@@ -52,6 +62,41 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
       stderr: true
     })
     this.setupWorkerListeners()
+  }
+
+  private scheduleWorkerRestart(error: Error): void {
+    if (!this.isActive || this.restarting || this.restartTimer) return
+
+    this.restarting = true
+    const delay = Math.min(250 * 2 ** this.restartAttempt, 5000)
+    this.restartAttempt += 1
+
+    logger.warn(`Restarting WebSocket worker in ${delay}ms`, {
+      source: 'wsPlatform',
+      function: 'scheduleWorkerRestart',
+      error
+    })
+
+    const failedWorker = this.worker
+    this.worker = null
+    if (failedWorker) {
+      failedWorker.removeAllListeners()
+      failedWorker.stdout?.removeAllListeners()
+      failedWorker.stderr?.removeAllListeners()
+      void failedWorker.terminate()
+    }
+
+    for (const client of this.clients) {
+      this.emit(PlatformEvent.CLIENT_DISCONNECTED, client)
+    }
+    this.clients = []
+
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      this.setupWorker()
+      this.worker?.postMessage({ type: 'start', options: this.options })
+      this.restarting = false
+    }, delay)
   }
 
   public handlePlatformEvent = async <T extends PlatformIPC>(data: T): Promise<T['data']> => {
@@ -98,7 +143,12 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
   public readonly name: string = 'WebSocket'
 
   private setupWorkerListeners(): void {
-    this.worker?.on('message', ({ event, data }: PlatformPayloads) => {
+    const worker = this.worker
+    if (!worker) return
+
+    worker.on('message', ({ event, data }: PlatformPayloads) => {
+      if (worker !== this.worker) return
+
       switch (event) {
         case PlatformEvent.CLIENT_UPDATED:
           {
@@ -171,9 +221,14 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
           this.emit(event, data)
           break
         case PlatformEvent.SERVER_STARTED:
+          this.restartAttempt = 0
+          this.restarting = false
           this.emit(event, data)
           break
         case PlatformEvent.CLIENT_PONG:
+          this.emit(event, data)
+          break
+        case PlatformEvent.DATA_SENT:
           this.emit(event, data)
           break
         case PlatformEvent.REFRESHED_CLIENTS:
@@ -193,25 +248,36 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
       }
     })
 
-    this.worker?.on('error', (error) => {
+    worker.on('error', (error) => {
+      if (worker !== this.worker) return
+
       logger.error(`WebSocket worker Error: ${error}`, {
         source: 'wsPlatform',
         function: 'setupWorkerListeners'
       })
       this.emit(PlatformEvent.ERROR, error)
-
-      this.stop()
-
-      this.start(this.options)
+      this.scheduleWorkerRestart(error)
     })
 
-    this.worker?.stdout?.on('data', (data) => {
+    worker.on('exit', (code) => {
+      if (worker !== this.worker || !this.isActive) return
+
+      const error = new Error(`WebSocket worker exited unexpectedly with code ${code}`)
+      logger.error(error.message, {
+        source: 'wsPlatform',
+        function: 'setupWorkerListeners',
+        error
+      })
+      this.scheduleWorkerRestart(error)
+    })
+
+    worker.stdout?.on('data', (data) => {
       logger.debug(`${data.toString().trim()}`, {
         source: 'wsPlatform',
         function: 'stdout'
       })
     })
-    this.worker?.stderr?.on('data', (data) => {
+    worker.stderr?.on('data', (data) => {
       logger.error(`${data.toString().trim()}`, {
         source: 'wsPlatform',
         function: 'stderr'
@@ -248,9 +314,12 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
   async start(options?: PlatformConnectionOptions): Promise<void> {
     if (this.isActive) return
     this.options = options
-    this.worker?.postMessage({ type: 'start', options })
+    if (!this.worker) {
+      this.setupWorker()
+    }
     this.isActive = true
     this.startTime = Date.now()
+    this.worker?.postMessage({ type: 'start', options })
   }
 
   async ping(clientId: string): Promise<{ server?: number; socket?: number }> {
@@ -289,34 +358,75 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
   }
 
   async stop(): Promise<void> {
-    if (!this.isActive) return
-    this.worker?.postMessage({ type: 'stop' })
     this.isActive = false
+    this.restarting = false
+    this.restartAttempt = 0
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+
+    for (const client of this.clients) {
+      this.emit(PlatformEvent.CLIENT_DISCONNECTED, client)
+    }
+    this.clients = []
+    const worker = this.worker
+    this.worker = null
+    if (worker) {
+      worker.postMessage({ type: 'stop' })
+      await worker.terminate()
+      worker.removeAllListeners()
+    }
   }
 
   async sendData<T extends string>(
     clientId: string,
     data: DeskThingToDeviceData & { app: T }
   ): Promise<boolean> {
-    if (!this.isActive) {
+    if (!this.isActive || !this.worker) {
       logger.warn('Socket is not active! Failed to send data')
       return false
     }
-    this.worker?.postMessage({ type: 'sendData', clientId, data })
-    return true
+    const requestId = randomUUID()
+    return new Promise<boolean>((resolve) => {
+      const resolveTask = (success: boolean): void => {
+        clearTimeout(timeoutRef)
+        this.removeListener(PlatformEvent.DATA_SENT, listener)
+        resolve(success)
+      }
+      const listener = (result: { requestId: string; success: boolean }): void => {
+        if (result.requestId === requestId) resolveTask(result.success)
+      }
+      const timeoutRef = setTimeout(() => resolveTask(false), 5000)
+
+      this.on(PlatformEvent.DATA_SENT, listener)
+      this.worker?.postMessage({ type: 'sendData', requestId, clientId, data })
+    })
   }
 
   refreshClient(clientId: string, forceRefresh?: boolean): Promise<Client | undefined> {
-    this.worker?.postMessage({ type: 'refreshClient', clientId, forceRefresh })
-    return Promise.race([
-      new Promise<Client | undefined>((resolve) =>
-        this.once(PlatformEvent.CLIENT_UPDATED, resolve)
-      ),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000))
-    ])
+    return new Promise<Client | undefined>((resolve) => {
+      const resolveTask = (client?: Client): void => {
+        clearTimeout(timeoutRef)
+        this.removeListener(PlatformEvent.CLIENT_UPDATED, listener)
+        resolve(client)
+      }
+      const listener = (client: Client): void => {
+        const matchesClient =
+          client.clientId === clientId ||
+          Object.values(client.identifiers).some((identifier) => identifier.id === clientId)
+        if (matchesClient) resolveTask(client)
+      }
+      const timeoutRef = setTimeout(() => resolveTask(), 5000)
+
+      this.on(PlatformEvent.CLIENT_UPDATED, listener)
+      this.worker?.postMessage({ type: 'refreshClient', clientId, forceRefresh })
+    })
   }
 
   async refreshClients(progressMultiplier: number): Promise<boolean> {
+    if (!this.worker) return false
+
     progressBus.start(ProgressChannel.REFRESH_CLIENTS, `Refreshing clients`, `Refreshing clients`)
 
     let totalProgress = 0
@@ -371,6 +481,7 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
   }
 
   fetchClients(): Promise<Client[]> {
+    if (!this.worker) return Promise.resolve(this.clients)
     this.worker?.postMessage({ type: 'fetchClients' })
     return new Promise((resolve) => this.once(PlatformEvent.CLIENT_LIST, resolve))
   }

@@ -19,13 +19,11 @@ import { ADBService } from './adbService'
 import { storeProvider } from '@server/stores/storeProvider'
 import logger from '@server/utils/logger'
 import { PlatformIPC } from '@shared/types/ipc/ipcPlatform'
-import { app } from 'electron'
-import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
 import { progressBus } from '@server/services/events/progressBus'
 import { ProgressChannel, SCRIPT_IDs } from '@shared/types'
 import { handleError } from '@server/utils/errorHandler'
 import { ClientIdentificationService } from '@server/services/clients/clientIdentificationService'
+import { updateManifest } from '@server/services/client/clientService'
 
 export class ADBPlatform extends EventEmitter<PlatformEvents> implements PlatformInterface {
   private adbService: ADBService
@@ -34,7 +32,13 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
   private clients: Client[] = []
   private initialized: boolean = false
   private intervalId: NodeJS.Timeout | null = null
+  private settingsCleanup: (() => void) | null = null
+  private autoDetect = false
+  private refreshInProgress = false
+  private missingDeviceChecks: Map<string, number> = new Map()
   private adbPort: number = 8891
+  private readonly HEALTH_CHECK_INTERVAL = 30000
+  private readonly MISSED_CHECKS_BEFORE_DISCONNECT = 2
 
   public readonly id: PlatformIDs = PlatformIDs.ADB
   public readonly name: string = 'ADB'
@@ -51,7 +55,7 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
   }
 
   fetchClients = async (): Promise<Client[]> => {
-    this.refreshClients()
+    await this.refreshClients()
     return this.clients
   }
 
@@ -286,21 +290,7 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
   }
 
   private async updateClientManifest(manifest: Partial<ClientManifest>): Promise<void> {
-    const userDataPath = app.getPath('userData')
-    const manifestPath = join(userDataPath, 'webapp', 'manifest.json')
-
-    try {
-      const existingManifest = await readFile(manifestPath, 'utf8')
-      const parsedManifest = JSON.parse(existingManifest)
-      const updatedManifest = { ...parsedManifest, ...manifest }
-      await writeFile(manifestPath, JSON.stringify(updatedManifest), 'utf8')
-    } catch (error) {
-      logger.error('Error updating client manifest:', {
-        function: 'updateClientManifest',
-        source: 'adbPlatform',
-        error: error as Error
-      })
-    }
+    await updateManifest(manifest)
   }
 
   async start(options: PlatformConnectionOptions): Promise<void> {
@@ -308,25 +298,40 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
     this.adbPort = options.port ?? this.adbPort
     this.isActive = true
     this.startTime = Date.now()
-    await this.refreshDevices()
 
     if (!this.initialized) {
       await this.initialize()
     }
+    if (this.autoDetect) {
+      await this.refreshDevices()
+    }
   }
 
   private async initialize(): Promise<void> {
+    if (this.initialized) return
+
     const settingStore = await storeProvider.getStore('settingsStore')
     const autoDetectADB = await settingStore.getSetting('adb_autoDetect')
 
     this.restartInterval(autoDetectADB)
 
-    settingStore.on('adb_autoDetect', (autoDetect) => {
+    this.settingsCleanup = settingStore.on('adb_autoDetect', (autoDetect) => {
       this.restartInterval(autoDetect)
+      if (autoDetect && this.isActive) {
+        void this.refreshDevices().catch((error) => {
+          logger.error('Failed to refresh devices after enabling ADB auto detection', {
+            domain: 'adbPlatform',
+            function: 'initialize',
+            error: error instanceof Error ? error : new Error(String(error))
+          })
+        })
+      }
     })
+    this.initialized = true
   }
 
   private restartInterval(autoDetect?: boolean): void {
+    this.autoDetect = Boolean(autoDetect)
     if (this.intervalId) {
       clearInterval(this.intervalId)
     }
@@ -341,45 +346,90 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
       return
     }
 
-    this.intervalId = setInterval(async () => {
-      const devices = await this.adbService.getDevices()
-      logger.debug(`Autodetected Devices: ${devices}`, {
-        domain: 'adbPlatform',
-        function: 'restartInterval'
-      })
-
-      // Checking if there are any new devices
-
-      if (devices.length > this.clients.length) {
-        logger.debug(`New devices detected: ${devices.length - this.clients.length}`, {
+    this.intervalId = setInterval(() => {
+      this.runHealthCheck().catch((error) => {
+        logger.error('ADB health check failed', {
           domain: 'adbPlatform',
-          function: 'restartInterval'
+          function: 'runHealthCheck',
+          error: error as Error
         })
-        await this.refreshDevices()
-      }
-    }, 30000)
+      })
+    }, this.HEALTH_CHECK_INTERVAL)
   }
 
-  private async refreshDevices(): Promise<void> {
-    try {
-      progressBus.startOperation(
-        ProgressChannel.ST_ADB_REFRESH,
-        'Refreshing Devices',
-        'Initializing refresh',
-        [
-          {
-            channel: ProgressChannel.REFRESH_DEVICES,
-            weight: 75
-          },
-          {
-            channel: ProgressChannel.BLANK,
-            weight: 25
-          }
-        ]
-      )
-      const update = progressBus.start(ProgressChannel.BLANK, 'Refresh Devices', 'getting devices')
+  private async runHealthCheck(): Promise<void> {
+    if (!this.isActive || this.refreshInProgress) return
 
-      const adbDevices = await this.adbService.getDevices()
+    const devices = await this.adbService.getDevices()
+    const currentDeviceIds = this.clients
+      .map((client) => client.identifiers[this.id]?.id)
+      .filter((id): id is string => Boolean(id))
+    const detectedDevices = new Set(devices)
+    const currentDevices = new Set(currentDeviceIds)
+
+    logger.debug(`Autodetected devices: ${devices.join(', ') || 'none'}`, {
+      domain: 'adbPlatform',
+      function: 'runHealthCheck'
+    })
+
+    await Promise.allSettled(
+      devices.map(async (deviceId) => {
+        await this.adbService.openPort(deviceId, this.adbPort)
+      })
+    )
+
+    for (const deviceId of devices) {
+      this.missingDeviceChecks.delete(deviceId)
+    }
+
+    const hasNewDevice = devices.some((deviceId) => !currentDevices.has(deviceId))
+    const hasConfirmedRemoval = currentDeviceIds.some((deviceId) => {
+      if (detectedDevices.has(deviceId)) return false
+
+      const missedChecks = (this.missingDeviceChecks.get(deviceId) ?? 0) + 1
+      this.missingDeviceChecks.set(deviceId, missedChecks)
+      return missedChecks >= this.MISSED_CHECKS_BEFORE_DISCONNECT
+    })
+
+    if (hasNewDevice || hasConfirmedRemoval) {
+      logger.info('ADB device set changed; refreshing platform clients', {
+        domain: 'adbPlatform',
+        function: 'runHealthCheck'
+      })
+      await this.refreshDevices({ devices, reportProgress: false })
+    }
+  }
+
+  private async refreshDevices(
+    options: { devices?: string[]; reportProgress?: boolean } = {}
+  ): Promise<void> {
+    if (this.refreshInProgress) return
+    this.refreshInProgress = true
+    const reportProgress = options.reportProgress ?? true
+
+    try {
+      if (reportProgress) {
+        progressBus.startOperation(
+          ProgressChannel.ST_ADB_REFRESH,
+          'Refreshing Devices',
+          'Initializing refresh',
+          [
+            {
+              channel: ProgressChannel.REFRESH_DEVICES,
+              weight: 75
+            },
+            {
+              channel: ProgressChannel.BLANK,
+              weight: 25
+            }
+          ]
+        )
+      }
+      const update = reportProgress
+        ? progressBus.start(ProgressChannel.BLANK, 'Refresh Devices', 'getting devices')
+        : (): void => undefined
+
+      const adbDevices = options.devices ?? (await this.adbService.getDevices())
       update(`Found ${adbDevices.length} devices`, 30)
 
       update('Cleaning up old devices', 60)
@@ -391,21 +441,29 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
         }
       })
 
-      // Get the list of new ADB IDs
-      const newAdbIDs = adbDevices.filter((adb) => {
-        return !this.clients.find((client) => client.identifiers[this.id]?.id === adb)
+      // Restore reverse-port mappings for every detected device. These mappings
+      // are lost when either ADB or the host restarts. One broken device should
+      // not prevent the remaining devices from being refreshed.
+      const portResults = await Promise.allSettled(
+        adbDevices.map(async (adbId) => {
+          logger.debug(`Opening port for ${adbId}`)
+          await this.adbService.openPort(adbId, this.adbPort)
+        })
+      )
+      portResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          logger.warn(`Unable to restore ADB port mapping for ${adbDevices[index]}`, {
+            source: 'adbPlatform',
+            function: 'refreshDevices',
+            error: result.reason instanceof Error ? result.reason : new Error(String(result.reason))
+          })
+        }
       })
 
-      // Open the ports one at a time
-      for (const adbId of newAdbIDs) {
-        logger.debug(`Opening port for ${adbId}`)
-        await this.adbService.openPort(adbId, this.adbPort)
-      }
-
-      const progressMultiplier = 1 / adbDevices.length
+      const progressMultiplier = adbDevices.length > 0 ? 1 / adbDevices.length : 1
 
       for (const adbDevice of adbDevices) {
-        await this.refreshClient(adbDevice, false, false, progressMultiplier)
+        await this.refreshClient(adbDevice, false, false, progressMultiplier, reportProgress)
       }
 
       // ensure the local list of clients is up to date
@@ -414,14 +472,21 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
       })
 
       this.emit(PlatformEvent.CLIENT_LIST, this.clients)
-      progressBus.complete(ProgressChannel.ST_ADB_REFRESH, 'Refresh complete')
+      this.missingDeviceChecks.clear()
+      if (reportProgress) {
+        progressBus.complete(ProgressChannel.ST_ADB_REFRESH, 'Refresh complete')
+      }
     } catch (error) {
-      progressBus.error(ProgressChannel.ST_ADB_REFRESH, 'Refresh failed', 'Refresh failed')
+      if (reportProgress) {
+        progressBus.error(ProgressChannel.ST_ADB_REFRESH, 'Refresh failed', 'Refresh failed')
+      }
       logger.error(`Failed to refresh devices`, {
         error: error as Error,
         function: 'refreshDevices',
         source: 'adbPlatform'
       })
+    } finally {
+      this.refreshInProgress = false
     }
   }
 
@@ -429,18 +494,27 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
     adbId: string,
     forceRefresh = false,
     notify = true,
-    progressMultiplier = 1
+    progressMultiplier = 1,
+    reportProgress = true
   ): Promise<Client | undefined> {
     const existingClient = this.clients.find((client) => client.identifiers[this.id]?.id === adbId)
 
-    progressBus.start(ProgressChannel.REFRESH_DEVICES, `Refreshing ${adbId}`, `Refreshing ${adbId}`)
+    if (reportProgress) {
+      progressBus.start(
+        ProgressChannel.REFRESH_DEVICES,
+        `Refreshing ${adbId}`,
+        `Refreshing ${adbId}`
+      )
+    }
 
     let totalProgress = 0
     const update = (message: string, progress: number): void => {
       const progressDelta = progress - totalProgress
       const updatedProgress = progressDelta * progressMultiplier
       totalProgress = progress
-      progressBus.incrementProgress(ProgressChannel.REFRESH_DEVICES, message, updatedProgress)
+      if (reportProgress) {
+        progressBus.incrementProgress(ProgressChannel.REFRESH_DEVICES, message, updatedProgress)
+      }
     }
 
     try {
@@ -511,6 +585,12 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
         }
 
         // This will eventually update this platform for the global client changes to take affect
+        const existingIndex = this.clients.findIndex(
+          (client) => client.identifiers[this.id]?.id === adbId
+        )
+        if (existingIndex !== -1) {
+          this.clients[existingIndex] = updates
+        }
         if (notify) {
           this.emit(PlatformEvent.CLIENT_UPDATED, updates)
         }
@@ -518,7 +598,7 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
         return updates
       } else {
         // first remove the client if it exists (i.e. if it is a forced refresh)
-        this.clients = this.clients.filter((client) => client.identifiers[this.id]?.id === adbId)
+        this.clients = this.clients.filter((client) => client.identifiers[this.id]?.id !== adbId)
         const newClient: Client = {
           clientId: adbId,
           connectionState: ConnectionState.Established, // not actually connected
@@ -585,7 +665,16 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
   async stop(): Promise<void> {
     if (!this.isActive) return
     this.isActive = false
+    if (this.intervalId) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
+    }
+    this.settingsCleanup?.()
+    this.settingsCleanup = null
+    this.autoDetect = false
+    this.missingDeviceChecks.clear()
     this.clients = []
+    this.initialized = false
   }
 
   isRunning(): boolean {

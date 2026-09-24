@@ -72,8 +72,6 @@ const useLogStore = create<LogStoreState>((set, get) => ({
   relaunchWithTerminal: () => {
     return window.electron.utility.restartWithTerminal()
   }
-
-
 }))
 
 export default useLogStore

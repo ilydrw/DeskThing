@@ -108,7 +108,7 @@ const AppActions: React.FC<AppSettingProps> = ({ app, onClose }: AppSettingProps
           <Button
             onClick={handleRun}
             title="Runs the app"
-            className={`justify-center gap-2 disabled:text-gray-300 border ${app.enabled ? 'hover:bg-cyan-500 border-cyan-500' : 'hover:bg-cyan-950 border-cyan-900'} w-full`}
+            className={`justify-center gap-2 disabled:text-gray-300 border ${app.enabled ? 'hover:bg-emerald-600 border-emerald-600' : 'hover:bg-emerald-950 border-emerald-900'} w-full`}
             disabled={!app.enabled || loading}
           >
             <IconPlay className="stroke-2" />
@@ -124,11 +124,11 @@ const AppActions: React.FC<AppSettingProps> = ({ app, onClose }: AppSettingProps
       </div>
       <div className="flex flex-wrap gap-2 p-4 justify-start">
         {app.manifest?.postinstall && (
-          <div className="flex gap-2 border-cyan-500 border rounded-md">
+          <div className="flex gap-2 border-emerald-600 border rounded-md">
             <Button
               disabled={loading}
               onClick={handlePostinstall}
-              className="group gap-2 justify-center items-center hover:bg-cyan-500"
+              className="group gap-2 justify-center items-center hover:bg-emerald-600"
             >
               <IconDownload className="group-disabled:hidden stroke-2" />
               <IconLoading className="group-enabled:hidden stroke-2" />

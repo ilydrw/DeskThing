@@ -3,13 +3,21 @@
  * It writes log messages to a JSON file and a readable log file, and also logs messages to the console with colored output.
  * The log level can be configured through the `Settings` store.
  */
-import fs, { existsSync } from 'fs'
+import fs from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import { LOGGING_LEVELS } from '@deskthing/types'
 import { Log, LOG_FILTER, ReplyData, ReplyFn, LoggingOptions, LOG_CONTEXTS } from '@shared/types'
-import { access, mkdir, readFile, rename, writeFile } from 'fs/promises'
+import { mkdir, readFile, writeFile } from 'fs/promises'
 import { SettingsStoreClass } from '@shared/stores/settingsStore'
+import {
+  appendBoundedLogFile,
+  MAX_PERSISTED_LOGS,
+  mergePersistedLogs,
+  pruneLogArchives,
+  rotateLogFile,
+  truncateLogMessage
+} from './logRetention'
 
 // Logger configuration
 const logFile = join(app.getPath('userData'), 'logs', 'application.log.json')
@@ -25,13 +33,14 @@ class Logger {
   private logContext: LOG_CONTEXTS[] = [LOG_CONTEXTS.APP, LOG_CONTEXTS.SERVER, LOG_CONTEXTS.CLIENT]
   private filesSetup = false
   private saveTimeout: NodeJS.Timeout | null = null
+  private setupPromise: Promise<void>
+  private saveQueue: Promise<void> = Promise.resolve()
+  private readableWriteQueue: Promise<void> = Promise.resolve()
 
   private constructor() {
-    try {
-      this.setupFiles()
-    } catch (error) {
+    this.setupPromise = this.setupFiles().catch((error) => {
       console.error('Failed to setup logging files!', error)
-    }
+    })
   }
 
   public setupSettingsListener = async (settingsStore: SettingsStoreClass): Promise<void> => {
@@ -61,13 +70,6 @@ class Logger {
   private setupFiles = async (): Promise<void> => {
     await mkdir(logDir, { recursive: true, mode: 0o755 })
 
-    const rotateFile = async (filePath: string): Promise<void> => {
-      if (existsSync(filePath)) {
-        const timestamp = new Date().toISOString().replace(/:/g, '-')
-        await rename(filePath, `${filePath}.${timestamp}`)
-      }
-    }
-
     const initializeFile = async (filePath: string, initialContent: string): Promise<void> => {
       await writeFile(filePath, initialContent, {
         encoding: 'utf-8',
@@ -75,19 +77,11 @@ class Logger {
       })
     }
 
-    try {
-      await Promise.all([rotateFile(logFile), rotateFile(readableLogFile)])
+    await Promise.all([rotateLogFile(logFile), rotateLogFile(readableLogFile)])
+    await Promise.all([initializeFile(logFile, '[]'), initializeFile(readableLogFile, '')])
+    await Promise.all([pruneLogArchives(logFile), pruneLogArchives(readableLogFile)])
 
-      await Promise.all([initializeFile(logFile, '[]'), initializeFile(readableLogFile, '')])
-
-      this.filesSetup = true
-    } catch (error) {
-      console.error('Failed to set up log files:', {
-        error: error as Error,
-        source: 'Logger',
-        function: 'setupFiles'
-      })
-    }
+    this.filesSetup = true
   }
 
   /**
@@ -103,37 +97,60 @@ class Logger {
   }
 
   private saveLogs = async (): Promise<void> => {
+    await this.setupPromise
     if (!this.filesSetup) {
       console.warn('Attempted to save logs before the log file was setup')
       return
     }
 
+    const pendingLogs = this.logs.splice(0).map((log) => ({
+      ...log,
+      log: truncateLogMessage(log.log)
+    }))
+    if (pendingLogs.length === 0) return
+
+    let existingLogs: Log[] = []
     try {
-      access(logFile)
       const fileLogs = await readFile(logFile, 'utf8')
-      const logs = JSON.parse(fileLogs)
+      const parsedLogs: unknown = JSON.parse(fileLogs)
+      existingLogs = Array.isArray(parsedLogs) ? (parsedLogs as Log[]) : []
+    } catch (readError) {
+      console.warn('Failed to read existing logs; replacing the malformed log file', readError)
+    }
 
-      const combinedLogs = [...this.logs, ...logs]
-
+    try {
+      const combinedLogs = mergePersistedLogs(existingLogs, pendingLogs, MAX_PERSISTED_LOGS)
       await writeFile(logFile, JSON.stringify(combinedLogs, null, 2))
-      this.logs = []
-    } catch {
-      try {
-        await writeFile(logFile, JSON.stringify(this.logs, null, 2))
-        this.logs = []
-      } catch (error) {
-        console.error('Failed to save logs:', error)
-      }
+    } catch (error) {
+      this.logs.unshift(...pendingLogs)
+      this.logs = this.logs.slice(-MAX_PERSISTED_LOGS)
+      console.error('Failed to save logs:', error)
     }
   }
 
   private debouncedSaveLogs = async (): Promise<void> => {
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout)
-    }
+    if (this.saveTimeout) return
     this.saveTimeout = setTimeout(async () => {
-      await this.saveLogs()
+      this.saveTimeout = null
+      this.saveQueue = this.saveQueue.then(this.saveLogs).catch((error) => {
+        console.error('Failed to process the log save queue:', error)
+      })
+      await this.saveQueue
     }, 4000)
+  }
+
+  private appendReadableLog = async (message: string): Promise<void> => {
+    this.readableWriteQueue = this.readableWriteQueue
+      .then(async () => {
+        await this.setupPromise
+        if (!this.filesSetup) return
+        await appendBoundedLogFile(readableLogFile, message)
+      })
+      .catch((error) => {
+        console.error('Failed to write to readable log file:', error)
+      })
+
+    await this.readableWriteQueue
   }
 
   /**
@@ -145,19 +162,19 @@ class Logger {
   }
 
   public info = async (message: string, options?: LoggingOptions): Promise<void> => {
-    this.log(LOGGING_LEVELS.LOG, message, options)
+    await this.log(LOGGING_LEVELS.LOG, message, options)
   }
 
   public warn = async (message: string, options?: LoggingOptions): Promise<void> => {
-    this.log(LOGGING_LEVELS.WARN, message, options)
+    await this.log(LOGGING_LEVELS.WARN, message, options)
   }
 
   public error = async (message: string, options?: LoggingOptions): Promise<void> => {
-    this.log(LOGGING_LEVELS.ERROR, message, options)
+    await this.log(LOGGING_LEVELS.ERROR, message, options)
   }
 
   public debug = async (message: string, options?: LoggingOptions): Promise<void> => {
-    this.log(LOGGING_LEVELS.DEBUG, message, options)
+    await this.log(LOGGING_LEVELS.DEBUG, message, options)
   }
 
   /**
@@ -203,7 +220,7 @@ class Logger {
   }
 
   public fatal = async (message: string, options?: LoggingOptions): Promise<void> => {
-    this.log(LOGGING_LEVELS.FATAL, message, options)
+    await this.log(LOGGING_LEVELS.FATAL, message, options)
   }
 
   private shouldLog(context: LOG_CONTEXTS, level: LOG_FILTER | LOGGING_LEVELS): boolean {
@@ -296,7 +313,8 @@ class Logger {
       }
 
       const readableTimestamp = new Date(options.date).toLocaleTimeString()
-      const readableMessage = `${options.context} ${readableTimestamp} ${options.store}${options.method ? `(${options.method})` : ''}: ${message}\n${options.error ? options.error.message + '\n' : ''}`
+      const readableLocation = `${options.store || ''}${options.method ? `(${options.method})` : ''}`
+      const readableMessage = `${options.context} ${readableTimestamp}${readableLocation ? ` ${readableLocation}` : ''}: ${truncateLogMessage(message)}\n${options.error ? truncateLogMessage(options.error.message) + '\n' : ''}`
 
       switch (level) {
         case LOGGING_LEVELS.ERROR:
@@ -322,11 +340,7 @@ class Logger {
       }
 
       this.debouncedSaveLogs()
-      try {
-        await fs.promises.appendFile(readableLogFile, readableMessage)
-      } catch (appendErr) {
-        console.error('Failed to write to readable log file:', appendErr)
-      }
+      await this.appendReadableLog(readableMessage)
     } catch (error) {
       console.error('Failed to log message:', error)
       throw error
@@ -342,6 +356,7 @@ class Logger {
   async notifyListeners(data: Log): Promise<void> {
     try {
       this.logs.push(data)
+      if (this.logs.length > MAX_PERSISTED_LOGS) this.logs.splice(0, this.logs.length - MAX_PERSISTED_LOGS)
       await Promise.all(this.listeners.map((listener) => listener(data)))
     } catch (error) {
       console.error('[Logger]: Failed to notify some listeners', error)
@@ -363,6 +378,7 @@ class Logger {
    * @returns A Promise that resolves with an array of log entries, or an empty array if the log file does not exist.
    */
   public async getLogs(num_logs: number = 20): Promise<Log[]> {
+    await this.setupPromise
     if (!fs.existsSync(logFile)) {
       return []
     }
@@ -378,6 +394,14 @@ class Logger {
       console.error('Error reading existing log data', error)
       return []
     }
+  }
+
+  public async flush(): Promise<void> {
+    if (this.saveTimeout) clearTimeout(this.saveTimeout)
+    this.saveTimeout = null
+    this.saveQueue = this.saveQueue.then(this.saveLogs)
+    await this.saveQueue
+    await this.readableWriteQueue
   }
 }
 

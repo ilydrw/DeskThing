@@ -207,7 +207,7 @@ const handleAutoConfig = async (step: number): Promise<AutoConfigResult> => {
           resolutionSteps.push('Try uploading the file manually')
           resolutionSteps.push('Make sure you have a stable internet connection')
           resolutionSteps.push(
-            `Try downloading manually from https://github.com/ItsRiprod/DeskThing-Firmwares/releases/tag/v8.9.2 and uploading the zip file `
+            'Ask the maintainer of this build for its supported firmware archive and upload the zip manually'
           )
           throw error
         })
@@ -240,7 +240,9 @@ const handleAutoConfig = async (step: number): Promise<AutoConfigResult> => {
           resolutionSteps.push(
             'Try using the BIOS port on your motherboard (look up the motherboard, it should be marked)'
           )
-          resolutionSteps.push('Try using https://terbium.app/ to do the flashing process')
+          resolutionSteps.push(
+            'Try the manual flashing workflow with a known-good firmware archive'
+          )
 
           throw error
         })
@@ -264,7 +266,7 @@ const handleAutoConfig = async (step: number): Promise<AutoConfigResult> => {
           resolutionSteps: [
             ...resolutionSteps,
             'Unplug and plug in your device holding buttons 1&4 then try again',
-            'If all else fails, join the discord at https://deskthing.app/discord'
+            'Open the developer logs and include them when reporting the failure'
           ]
         }
       }
@@ -351,7 +353,7 @@ const handleAutoConfig = async (step: number): Promise<AutoConfigResult> => {
           errorText: error instanceof Error ? error.message : 'Encountered an Unknown Error',
           resolutionSteps: [
             ...resolutionSteps,
-            'If all else fails, join the discord at https://deskthing.app/discord'
+            'Open the developer logs and include them when reporting the failure'
           ]
         }
       }

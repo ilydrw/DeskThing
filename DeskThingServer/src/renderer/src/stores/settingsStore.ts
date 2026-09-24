@@ -45,6 +45,7 @@ const useSettingsStore = create<SettingsStoreState>((set, get) => ({
     flag_firstClose: false,
     flag_hasOpened: false,
     flag_collectStats: false,
+    privacy_statsConsentVersion: 1,
     flag_misc: {}
   },
   initialize: async () => {

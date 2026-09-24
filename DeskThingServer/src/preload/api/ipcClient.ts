@@ -5,7 +5,8 @@ import {
   ClientIPCData,
   ClientHandlerReturnType,
   IPC_HANDLERS,
-  ClientDownloadReturnData
+  ClientDownloadReturnData,
+  KnownDevice
 } from '@shared/types'
 import { ipcRenderer } from 'electron'
 
@@ -108,6 +109,29 @@ export const client = {
     await sendCommand({
       kind: IPC_HANDLERS.CLIENT,
       type: IPC_CLIENT_TYPES.OPEN_CLIENT
+    }),
+
+  getKnownDevices: async (): Promise<KnownDevice[]> =>
+    await sendCommand({
+      kind: IPC_HANDLERS.CLIENT,
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES,
+      request: 'get'
+    }),
+
+  renameDevice: async (deviceId: string, displayName?: string): Promise<KnownDevice | undefined> =>
+    await sendCommand({
+      kind: IPC_HANDLERS.CLIENT,
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES,
+      request: 'rename',
+      payload: { deviceId, displayName }
+    }),
+
+  forgetDevice: async (deviceId: string): Promise<boolean> =>
+    await sendCommand({
+      kind: IPC_HANDLERS.CLIENT,
+      type: IPC_CLIENT_TYPES.KNOWN_DEVICES,
+      request: 'forget',
+      payload: { deviceId }
     })
 }
 

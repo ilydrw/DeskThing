@@ -7,13 +7,15 @@ import { stat } from 'node:fs/promises'
 import { AppProcessTypes } from '@shared/stores/appProcessStore'
 
 vi.mock('node:worker_threads', () => ({
-  Worker: vi.fn().mockImplementation(() => ({
-    on: vi.fn(),
-    postMessage: vi.fn(),
-    stdout: { on: vi.fn() },
-    stderr: { on: vi.fn() },
-    terminate: vi.fn()
-  })),
+  Worker: vi.fn().mockImplementation(function () {
+    return {
+      on: vi.fn(),
+      postMessage: vi.fn(),
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      terminate: vi.fn()
+    }
+  }),
   parentPort: vi.fn()
 }))
 
@@ -67,7 +69,7 @@ describe('AppProcessStore', () => {
     it('should prevent spawning duplicate processes', async () => {
       vi.mocked(stat).mockResolvedValue({} as any)
 
-      await appProcessStore.spawnProcess({ name: 'testApp' } as App)
+      expect(await appProcessStore.spawnProcess({ name: 'testApp' } as App)).toBe(true)
       const result = await appProcessStore.spawnProcess({ name: 'testApp' } as App)
 
       expect(result).toBe(false)

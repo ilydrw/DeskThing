@@ -39,6 +39,8 @@ export class AppDataStore
   private appDataCache: Record<string, AppDataInterface> = {}
 
   private functionTimeouts: Record<string, NodeJS.Timeout> = {}
+  private saveVersions = new Map<string, number>()
+  private activeSaves = new Map<string, Promise<void>>()
 
   private appStore: AppStoreClass
 
@@ -56,8 +58,8 @@ export class AppDataStore
   async initialize(): Promise<void> {
     if (this._initialized) return
     this._initialized = true
-    this.appStore.initialize()
-    this.initAppCache()
+    await this.appStore.initialize()
+    await this.initAppCache()
   }
 
   private initAppListeners = (): void => {
@@ -203,12 +205,7 @@ export class AppDataStore
    * @implements CacheableStore
    */
   clearCache = async (): Promise<void> => {
-    // Clear all values in appDataCache except version
-    await this.saveDataAllData(false)
-    Object.values(this.functionTimeouts).forEach((timeout) => {
-      clearTimeout(timeout)
-    })
-    this.functionTimeouts = {}
+    await this.saveToFile()
   }
 
   private getAvailableData = (): string[] => {
@@ -274,60 +271,49 @@ export class AppDataStore
     })
   }
 
-  private async saveDataAllData(notifyApp = true): Promise<void> {
-    if (this.functionTimeouts['server-saveApps']) {
-      Logger.debug(`Cancelling previous saveApps timeout and starting a new one`, {
-        source: 'AppDataStore',
-        function: 'saveAppsToFile'
-      })
-      clearTimeout(this.functionTimeouts['server-saveApps'])
-    }
-
-    this.functionTimeouts['server-saveApps'] = setTimeout(async () => {
-      this.notifyGlobal()
-      await Promise.all(
-        Object.keys(this.appDataCache).map(async (appName) => {
-          await this.saveData(appName, notifyApp)
-        })
-      )
-    }, 500)
-  }
-
   private async saveData(name: string, notifyApp = true): Promise<void> {
     if (!this.appDataCache[name]) return
-
-    // Clear any existing timeout for this app
-    if (this.functionTimeouts[name]) {
-      clearTimeout(this.functionTimeouts[name])
-    }
-
-    // Set new timeout
-    this.functionTimeouts[name] = setTimeout(async () => {
-      if (Object.values(this.appDataCache[name]).length > 1) {
-        await setData(name, this.appDataCache[name])
-      }
-      await this.notifyAppFields(name, notifyApp)
-      Logger.debug(`Saving and removing ${name} from cache`, {
-        function: 'saveData',
-        source: 'appDataStore'
-      })
-      delete this.appDataCache[name]
+    this.saveVersions.set(name, (this.saveVersions.get(name) ?? 0) + 1)
+    clearTimeout(this.functionTimeouts[name])
+    this.functionTimeouts[name] = setTimeout(() => {
       delete this.functionTimeouts[name]
+      void this.persistData(name, notifyApp).catch((error) => {
+        Logger.error(`Unable to save data for ${name}; unsaved changes retained in memory`, {
+          source: 'AppDataStore', function: 'saveData', error: error as Error
+        })
+      })
     }, 700)
+  }
+
+  private async persistData(name: string, notifyApp = false): Promise<void> {
+    const saved = (this.activeSaves.get(name) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      const data = this.appDataCache[name]
+      if (!data || Object.keys(data).length <= 1) return
+      const version = this.saveVersions.get(name)
+      const snapshot = structuredClone(data)
+      await setData(name, snapshot)
+      if (version !== this.saveVersions.get(name)) return
+      await this.notifyAppFields(name, notifyApp)
+      if (version === this.saveVersions.get(name)) delete this.appDataCache[name]
+    })
+    this.activeSaves.set(name, saved)
+    try {
+      await saved
+    } finally {
+      if (this.activeSaves.get(name) === saved) this.activeSaves.delete(name)
+    }
   }
 
   /**
    * @implements CacheableStore
    */
   saveToFile = async (): Promise<void> => {
-    await Promise.all(
-      Object.keys(this.appDataCache).map(async (appName) => {
-        // Check if there is any data besides settings
-        if (Object.values(this.appDataCache[appName]).length > 1) {
-          await this.saveData(appName)
-        }
-      })
-    )
+    for (const timeout of Object.values(this.functionTimeouts)) clearTimeout(timeout)
+    this.functionTimeouts = {}
+    const results = await Promise.allSettled(Object.keys(this.appDataCache).map((name) => this.persistData(name)))
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Unable to flush app data')
+    await this.notifyGlobal()
   }
 
   async setupListeners(taskStore: TaskStoreClass): Promise<void> {
@@ -429,7 +415,8 @@ export class AppDataStore
       function: 'getData'
     })
     const data = await getData(name)
-    if (!data) {
+    const pending = this.appDataCache[name]
+    if (!data && (!pending || Object.keys(pending).length <= 1)) {
       Logger.debug(`No data found for ${name}`, {
         source: 'AppDataStore',
         domain: name,
@@ -438,8 +425,17 @@ export class AppDataStore
       return
     }
 
-    this.appDataCache[name] = data
-    return data
+    const merged: AppDataInterface = {
+      ...data, ...pending,
+      version: pending?.version ?? data?.version ?? '0.0.0',
+      data: { ...data?.data, ...pending?.data },
+      settings: { ...data?.settings, ...pending?.settings },
+      tasks: { ...data?.tasks, ...pending?.tasks },
+      actions: { ...data?.actions, ...pending?.actions },
+      keys: { ...data?.keys, ...pending?.keys }
+    }
+    this.appDataCache[name] = merged
+    return merged
   }
 
   async getSavedData(name: string): Promise<SavedData | undefined> {
@@ -876,7 +872,7 @@ export class AppDataStore
     const dataToDelete = Array.isArray(dataIds) ? dataIds : [dataIds]
 
     dataToDelete.forEach((key) => {
-      if (curData?.data && curData.data[key]) {
+      if (curData?.data && Object.hasOwn(curData.data, key)) {
         delete curData.data[key]
       }
     })

@@ -8,7 +8,8 @@ import { useNotificationStore } from '@renderer/stores'
 const NotificationButton: React.FC = () => {
   const [bounce, setBounce] = useState(false)
   const taskList = useTaskStore((state) => state.taskList)
-  const taskNum = taskList && Object.values(taskList).reduce((acc, tasks) => acc + Object.keys(tasks).length, 0)
+  const taskNum =
+    taskList && Object.values(taskList).reduce((acc, tasks) => acc + Object.keys(tasks).length, 0)
   const [prevTaskNum, setPrevTaskNum] = useState(taskNum)
   const activeErrors = useNotificationStore((state) => state.issues)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -33,7 +34,7 @@ const NotificationButton: React.FC = () => {
       <Button
         title="System Notifications"
         onClick={handleOpenNotifications}
-        className={`gap-2 hover:bg-zinc-900 items-center justify-center w-full ${bounce && 'animate-highlight border'}`}
+        className={`gap-2 items-center justify-center w-full ${bounce && 'animate-highlight border'}`}
       >
         {activeErrors && activeErrors.length > 0 ? (
           <div className="flex gap-1 text-red-500">
@@ -43,7 +44,7 @@ const NotificationButton: React.FC = () => {
         ) : (
           <IconDetails iconSize={24} strokeWidth={2} />
         )}
-        <p className="flex-grow text-center text-lg md:block hidden">Tasks</p>
+        <p className="flex-grow text-left text-sm md:block hidden">Activity</p>
       </Button>
     </div>
   )

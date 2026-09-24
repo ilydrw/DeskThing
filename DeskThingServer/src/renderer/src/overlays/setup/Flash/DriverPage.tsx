@@ -11,6 +11,7 @@ import { useProgressStore } from '@renderer/stores/progressStore'
 export const DriverPage: FC<SuperbirdPageProps> = ({ onComplete }) => {
   const [manualOverride, setManualOverride] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const runDriver = useFlashStore((state) => state.runDriver)
   const progress = useChannelProgress(ProgressChannel.ST_FLASH_DRIVER)
@@ -24,9 +25,15 @@ export const DriverPage: FC<SuperbirdPageProps> = ({ onComplete }) => {
 
   const handleConfigureDriver = async (): Promise<void> => {
     setLoading(true)
-    await runDriver()
-    setLoading(false)
-    onComplete('Device Configured Automatically')
+    setErrorMessage(null)
+    try {
+      await runDriver()
+      onComplete('Device Configured Automatically')
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleManualOverride = (): void => {
@@ -52,10 +59,9 @@ export const DriverPage: FC<SuperbirdPageProps> = ({ onComplete }) => {
             />
             <div className="text-center flex flex-col gap-2 text-sm text-zinc-400">
               <p>1. Press and hold buttons 1 and 4 while plugging in your device</p>
-              <p>2. Run Configure Driver below OR manually run:</p>
-              <code className="bg-zinc-800 px-2 py-1 rounded">
-                irm https://driver.terbium.app/get | iex
-              </code>
+              <p>
+                2. Run the verified driver installer below, or install the GX-CHIP driver manually
+              </p>
               <div className="text-xs bg-neutral-950 rounded p-3 flex flex-col items-start">
                 <p className="italic">
                   NOTE: You only need to run the driver configuration ONCE per computer
@@ -88,10 +94,15 @@ export const DriverPage: FC<SuperbirdPageProps> = ({ onComplete }) => {
                 className="bg-zinc-700 disabled:bg-zinc-800 disabled:font-normal disabled:text-neutral-400 hover:bg-zinc-500 text-neutral-300 hover:text-neutral-200 px-4 py-2 rounded-md transition-all duration-200"
                 disabled={loading}
               >
-                Force Completion
+                I installed it manually
               </Button>
             </div>
           </div>
+          {errorMessage && (
+            <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              {errorMessage}
+            </div>
+          )}
           {progress.progress && progress.isLoading && (
             <div className="flex w-full mt-4">
               <LogEntry progressEvent={progress.progress} className="w-full" />

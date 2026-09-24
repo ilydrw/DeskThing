@@ -8,15 +8,36 @@ import { setupDock } from '../system/dock'
 import { setupIpcHandlers } from '../ipc/ipcManager'
 import { loadModules } from './moduleLoader'
 import { closeLoadingWindow, buildMainWindow } from '../windows/windowManager'
-import { nextTick } from 'node:process'
 import { updateLoadingStatus } from '@server/windows/loadingWindow'
 import { join } from 'node:path'
 import { checkFlag } from './lifecycleCheck'
+import { createBeforeQuitHandler } from './shutdownHandler'
 
 /**
  * Initialize the application lifecycle
  */
 export async function initializeAppLifecycle(): Promise<void> {
+  let afterStartupTimer: NodeJS.Timeout | undefined = undefined
+  const persistBeforeQuit = async (): Promise<void> => {
+    clearTimeout(afterStartupTimer)
+    const { storeProvider } = await import('../stores/storeProvider')
+    const { default: cacheManager } = await import('../services/utility/cacheManager')
+    const { flushFileOperations } = await import('../services/files/fileService')
+    const { default: logger } = await import('../utils/logger')
+    const results = await Promise.allSettled([
+      storeProvider.collectShutdownStats(),
+      storeProvider.dispose()
+    ])
+    try {
+      await cacheManager.hibernateAll()
+    } finally {
+      await flushFileOperations()
+      await logger.flush()
+    }
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Some services failed to stop')
+  }
+  app.on('before-quit', createBeforeQuitHandler(persistBeforeQuit, () => app.quit()))
   // Set up protocol handler
   setupProtocolHandler()
 
@@ -37,6 +58,8 @@ export async function initializeAppLifecycle(): Promise<void> {
   })
 
   const startMinimized = await checkFlag('server_startMinimized')
+  await setupIpcHandlers()
+  await loadModules()
   // Create main window after loading is complete
   if (!startMinimized) {
     await updateLoadingStatus('Creating main window')
@@ -48,37 +71,17 @@ export async function initializeAppLifecycle(): Promise<void> {
     })
   }
 
-  // Load modules and set up IPC handlers
-  nextTick(async () => {
-    await setupIpcHandlers()
-    await loadModules()
-    if (startMinimized) {
-      await updateLoadingStatus('Start Minimized: TRUE')
-      setTimeout(() => {
-        closeLoadingWindow() // ensure the loading window is closed
-      }, 3000)
-    }
-  })
+  if (startMinimized) closeLoadingWindow()
 
-  setTimeout(async () => {
+  afterStartupTimer = setTimeout(async () => {
     try {
       const { afterStartTasks } = await import('@server/services/initialization/AfterStartupTasks')
 
-      afterStartTasks()
+      await afterStartTasks()
     } catch (error) {
       console.error('Failed to run startup tasks', error)
     }
   }, 10000)
-
-  app.on('before-quit', async () => {
-    console.log('Quitting app')
-    const { storeProvider } = await import('../stores/storeProvider')
-    const statsCollector = await storeProvider.getStore('statsCollector')
-    await statsCollector.collectSessionCloseStats()
-
-    const { default: cacheManager } = await import('../services/utility/cacheManager')
-    await cacheManager.hibernateAll() // hibernate all before closing to ensure all cache is saved
-  })
 
   // Handle window recreation on macOS
   app.on('activate', function () {
@@ -96,6 +99,7 @@ export async function initializeAppLifecycle(): Promise<void> {
 
   // Handle window closure
   app.on('window-all-closed', async () => {
+    try {
     const { storeProvider } = await import('../stores/storeProvider')
     const settingsStore = await storeProvider.getStore('settingsStore')
     const settings = await settingsStore.getSettings()
@@ -113,15 +117,17 @@ export async function initializeAppLifecycle(): Promise<void> {
         body: 'DeskThing will continue to work.',
         icon: trayIcon
       }).show()
-      settingsStore.saveSetting('flag_firstClose', false)
+      await settingsStore.saveSetting('flag_firstClose', false)
     }
 
     if (settings?.server_minimizeApp) {
-      // Clear cache from everywhere
-      const { default: cacheManager } = await import('../services/utility/cacheManager')
-      await cacheManager.hibernateAll()
+      // Device and music services continue running while the UI is hidden.
+      await storeProvider.saveAllToFile()
     } else {
       app.quit()
+    }
+    } catch (error) {
+      console.error('Failed to handle window closure', error)
     }
   })
 }

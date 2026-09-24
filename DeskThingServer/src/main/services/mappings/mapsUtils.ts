@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { Action } from '@deskthing/types'
 import logger from '@server/utils/logger'
+import { resolvePathWithinRoot } from '@server/utils/pathSecurity'
 
 export const FetchIcon = async (action: Action): Promise<string | null> => {
   if (!action) return null
@@ -16,10 +17,17 @@ export const FetchIcon = async (action: Action): Promise<string | null> => {
   }
 
   try {
-    const iconPath =
+    const iconRoot =
       action.source === 'server'
-        ? path.join(app.getPath('userData'), 'webapp', 'icons', `${action.icon || action.id}.svg`)
-        : path.join(getAppFilePath(action.source), 'icons', `${action.icon || action.id}.svg`)
+        ? path.join(app.getPath('userData'), 'webapp', 'icons')
+        : getAppFilePath(action.source, 'icons')
+    const iconPath = resolvePathWithinRoot(iconRoot, `${action.icon || action.id}.svg`)
+    if (!iconPath) {
+      logger.warn('Rejected an action icon path outside its icon directory', {
+        source: 'FetchIcon'
+      })
+      return null
+    }
 
     return await readFile(iconPath, 'utf8')
   } catch (error) {

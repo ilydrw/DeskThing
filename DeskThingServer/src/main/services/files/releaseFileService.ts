@@ -8,6 +8,24 @@ import { readFromFile, writeToFile } from './fileService'
 import { join } from 'node:path'
 import logger from '@server/utils/logger'
 import { assertReleaseFileMigration } from '../releases/migrationUtils'
+import { isRecord } from '@shared/validation/settings'
+
+const validateReleaseFile = (value: unknown): void => {
+  if (!isRecord(value) || !['0.11.11', '0.11.8', '0.10.0'].includes(String(value.version)) ||
+      !Array.isArray(value.repositories) || !value.repositories.every((repo) => typeof repo === 'string') ||
+      !Array.isArray(value.releases) || !value.releases.every(isRecord) ||
+      typeof value.timestamp !== 'number' || !Number.isFinite(value.timestamp)) {
+    throw new Error('Invalid or unsupported release file')
+  }
+  if (value.version !== '0.10.0') {
+    if (!['app', 'client'].includes(String(value.type)) || value.releases.some((release) =>
+      typeof release.id !== 'string' || !isRecord(release.mainRelease) ||
+      !isRecord(release.mainRelease[value.type === 'app' ? 'appManifest' : 'clientManifest']) ||
+      !Array.isArray(release.pastReleases))) throw new Error('Invalid cached release')
+  } else if ('references' in value && !Array.isArray(value.references)) {
+    throw new Error('Invalid legacy release references')
+  }
+}
 
 export const saveAppReleaseData = async (appReleaseFile: AppReleaseFile): Promise<void> => {
   try {
@@ -35,7 +53,7 @@ export const saveClientReleaseData = async (
       function: 'saveClientReleaseFile',
       source: 'releaseFileService'
     })
-    throw new Error(`Failed to save app release data`, { cause: error })
+    throw new Error(`Failed to save client release data`, { cause: error })
   }
 }
 
@@ -43,9 +61,9 @@ export const readAppReleaseData = async (): Promise<AppReleaseFile01111 | undefi
   try {
     const appReleasePath = join('system', 'appReleases.json')
 
-    const appReleaseFile = await readFromFile<AppReleaseFile>(appReleasePath)
+    const appReleaseFile = await readFromFile<AppReleaseFile>(appReleasePath, validateReleaseFile)
 
-    if (!appReleaseFile) throw new Error('Invalid app release file (does not exist)')
+    if (!appReleaseFile) return undefined
 
     return assertReleaseFileMigration(appReleaseFile)
   } catch (error) {
@@ -62,9 +80,9 @@ export const readClientReleaseData = async (): Promise<ClientReleaseFile01111 | 
   try {
     const clientReleasePath = join('system', 'clientReleases.json')
 
-    const clientReleaseFile = await readFromFile<ClientReleaseFile>(clientReleasePath)
+    const clientReleaseFile = await readFromFile<ClientReleaseFile>(clientReleasePath, validateReleaseFile)
 
-    if (!clientReleaseFile) throw new Error('Invalid client release file (does not exist)')
+    if (!clientReleaseFile) return undefined
 
     return assertReleaseFileMigration(clientReleaseFile)
   } catch (error) {
@@ -73,6 +91,6 @@ export const readClientReleaseData = async (): Promise<ClientReleaseFile01111 | 
       function: 'readClientReleaseData',
       source: 'releaseFileService'
     })
-    throw new Error(`Failed to read app release data`, { cause: error })
+    throw new Error(`Failed to read client release data`, { cause: error })
   }
 }

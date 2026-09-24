@@ -12,19 +12,16 @@ import { ThingifyStoreClass, ThingifyStoreEvents } from '@shared/stores/thingify
 import { app } from 'electron/main'
 import { basename, dirname, join } from 'node:path'
 import { handleError } from '@server/utils/errorHandler'
-import { access, copyFile, mkdir, readdir, unlink, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, open, readdir, rename, unlink } from 'node:fs/promises'
 import logger from '@server/utils/logger'
 import { existsSync } from 'node:fs'
 import { progressBus } from '@server/services/events/progressBus'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 export class ThingifyStore
   extends EventEmitter<ThingifyStoreEvents>
   implements CacheableStore, ThingifyStoreClass
 {
-  private readonly _base_url: string = 'https://thingify.tools/api/v1'
-  private readonly _thinglabs_id: string = 'P3QZbZIDWnp5m_azQFQqP'
-  private readonly _fallback_firmware_url: string =
-    'https://github.com/ItsRiprod/DeskThing-Firmwares/releases/download/v8.9.2/8.9.2-thinglabs_norndis.zip'
   private readonly downloadLocation: string
 
   // cache
@@ -78,11 +75,23 @@ export class ThingifyStore
   private fetchFirmware = async (): Promise<ThingifyApiFirmware | null> => {
     await logger.info('Fetching firmware', { source: 'ThingifyStore', function: 'fetchFirmware' })
     if (this.thingifyFirmwareCache) return this.thingifyFirmwareCache
-    const response = await fetch(`${this._base_url}/firmware/${this._thinglabs_id}`)
-    if (!response.ok) return null
-    const data = await response.json()
-    this.thingifyFirmwareCache = data
-    return data
+
+    const { firmwareApiUrl, firmwareProductId } = getServiceConfig()
+    if (!firmwareApiUrl || !firmwareProductId) return null
+
+    try {
+      const response = await fetch(`${firmwareApiUrl}/firmware/${firmwareProductId}`)
+      if (!response.ok) return null
+      const data = (await response.json()) as ThingifyApiFirmware
+      this.thingifyFirmwareCache = data
+      return data
+    } catch (error) {
+      logger.warn(`Unable to fetch firmware catalog: ${handleError(error)}`, {
+        source: 'ThingifyStore',
+        function: 'fetchFirmware'
+      })
+      return null
+    }
   }
 
   private fetchVersion = async (versionId: string): Promise<ThingifyApiVersion | null> => {
@@ -91,11 +100,23 @@ export class ThingifyStore
       function: 'fetchVersion'
     })
     if (this.thingifyVersionsCache[versionId]) return this.thingifyVersionsCache[versionId]
-    const response = await fetch(`${this._base_url}/version/${versionId}`)
-    if (!response.ok) return null
-    const data = await response.json()
-    this.thingifyVersionsCache[versionId] = data
-    return data
+
+    const { firmwareApiUrl } = getServiceConfig()
+    if (!firmwareApiUrl) return null
+
+    try {
+      const response = await fetch(`${firmwareApiUrl}/version/${versionId}`)
+      if (!response.ok) return null
+      const data = (await response.json()) as ThingifyApiVersion
+      this.thingifyVersionsCache[versionId] = data
+      return data
+    } catch (error) {
+      logger.warn(`Unable to fetch firmware version ${versionId}: ${handleError(error)}`, {
+        source: 'ThingifyStore',
+        function: 'fetchVersion'
+      })
+      return null
+    }
   }
 
   private downloadFile = async (versionId: string, fileId: string): Promise<void> => {
@@ -131,17 +152,22 @@ export class ThingifyStore
   }
 
   private download = async (fileDownloadUrl: string, fileName: string): Promise<void> => {
+    const safeFileName = basename(fileName)
+    if (!safeFileName) {
+      throw new Error('Firmware download did not provide a valid file name')
+    }
+
     const response = await fetch(fileDownloadUrl)
     if (!response.ok) {
       await logger.error(
-        `Error downloading file ${fileName} with response ${response.status}: ${response.statusText}`,
+        `Error downloading file ${safeFileName} with response ${response.status}: ${response.statusText}`,
         {
           source: 'ThingifyStore',
           function: 'downloadFile'
         }
       )
       throw new Error(
-        `Error downloading file ${fileName}! Received ${response.status}: ${response.statusText}`
+        `Error downloading file ${safeFileName}! Received ${response.status}: ${response.statusText}`
       )
     }
 
@@ -156,46 +182,58 @@ export class ThingifyStore
 
     const contentLength = parseInt(response.headers.get('Content-Length') || '0')
     let receivedLength = 0
-    const chunks: Uint8Array[] = []
     let lastProgress = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      chunks.push(value)
-      receivedLength += value.length
-
-      const progress = Math.floor((receivedLength / contentLength) * 100)
-      if (progress >= lastProgress + 0.5) {
-        this.emit('downloadProgress', {
-          channel: ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD,
-          status: ProgressStatus.RUNNING,
-          message: `${progress}% complete - ${(receivedLength / 1024 / 1024).toFixed(2)}MB of ${(contentLength / 1024 / 1024).toFixed(2)}MB`,
-          operation: `Downloading ${fileName}`,
-          progress: progress
-        })
-        await logger.debug(`Download progress: ${progress}%`, {
-          source: 'ThingifyStore',
-          function: 'downloadFile'
-        })
-        lastProgress = progress
-      }
-    }
-
-    const allChunks = new Uint8Array(receivedLength)
-    let position = 0
-    for (const chunk of chunks) {
-      allChunks.set(chunk, position)
-      position += chunk.length
-    }
-
-    const filePath = join(this.downloadLocation, fileName)
+    let lastReportedBytes = 0
+    const filePath = join(this.downloadLocation, safeFileName)
+    const partialFilePath = `${filePath}.partial`
 
     // create the file location recursively for unix systems
     await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, Buffer.from(allChunks))
-    await logger.info(`File ${fileName} downloaded successfully`, {
+    const fileHandle = await open(partialFilePath, 'w')
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        await fileHandle.write(value)
+        receivedLength += value.length
+
+        const progress =
+          contentLength > 0 ? Math.min(99, Math.floor((receivedLength / contentLength) * 100)) : 0
+        const shouldReport =
+          contentLength > 0
+            ? progress >= lastProgress + 1
+            : receivedLength - lastReportedBytes >= 5 * 1024 * 1024
+
+        if (shouldReport) {
+          const sizeMessage =
+            contentLength > 0
+              ? `${(receivedLength / 1024 / 1024).toFixed(2)}MB of ${(contentLength / 1024 / 1024).toFixed(2)}MB`
+              : `${(receivedLength / 1024 / 1024).toFixed(2)}MB received`
+
+          this.emit('downloadProgress', {
+            channel: ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD,
+            status: ProgressStatus.RUNNING,
+            message: contentLength > 0 ? `${progress}% complete - ${sizeMessage}` : sizeMessage,
+            operation: `Downloading ${safeFileName}`,
+            progress
+          })
+          lastProgress = progress
+          lastReportedBytes = receivedLength
+        }
+      }
+    } catch (error) {
+      await fileHandle.close()
+      await unlink(partialFilePath).catch(() => undefined)
+      throw error
+    }
+
+    await fileHandle.close()
+    await unlink(filePath).catch(() => undefined)
+    await rename(partialFilePath, filePath)
+
+    await logger.info(`File ${safeFileName} downloaded successfully`, {
       source: 'ThingifyStore',
       function: 'downloadFile'
     })
@@ -203,13 +241,16 @@ export class ThingifyStore
     this.emit('downloadProgress', {
       channel: ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD,
       status: ProgressStatus.COMPLETE,
-      message: `100% complete - ${(receivedLength / 1024 / 1024).toFixed(2)}MB of ${(contentLength / 1024 / 1024).toFixed(2)}MB`,
-      operation: `Downloaded ${fileName} Successfully`,
+      message:
+        contentLength > 0
+          ? `100% complete - ${(receivedLength / 1024 / 1024).toFixed(2)}MB of ${(contentLength / 1024 / 1024).toFixed(2)}MB`
+          : `100% complete - ${(receivedLength / 1024 / 1024).toFixed(2)}MB`,
+      operation: `Downloaded ${safeFileName} Successfully`,
       progress: 100
     })
 
     logger.debug(`Downloaded to ${filePath}`)
-    this.setStagedFile(fileName)
+    this.setStagedFile(safeFileName)
   }
 
   private uploadFile = async (filePath: string): Promise<void> => {
@@ -367,7 +408,7 @@ export class ThingifyStore
         error: error as Error
       })
       return {
-        status: true,
+        status: false,
         statusText: 'Error Uploading',
         operationText: handleError(error)
       }
@@ -391,7 +432,8 @@ export class ThingifyStore
 
   public getAvailableStagedFiles = async (): Promise<string[]> => {
     try {
-      return await readdir(this.downloadLocation)
+      const files = await readdir(this.downloadLocation)
+      return files.filter((file) => !file.endsWith('.partial'))
     } catch (error) {
       await logger.error(`Error getting available staged files`, {
         source: 'ThingifyStore',
@@ -423,8 +465,8 @@ export class ThingifyStore
   public downloadRecommendedFirmware = async (): Promise<string> => {
     progressBus.startOperation(
       ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD,
-      'Downloading Recommended Driver',
-      'Downloading Recommended Driver',
+      'Downloading Recommended Firmware',
+      'Downloading Recommended Firmware',
       [
         {
           channel: ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD,
@@ -433,10 +475,14 @@ export class ThingifyStore
       ]
     )
 
-    // Attempt an early break if the exact match is found
+    const config = getServiceConfig()
     const availableFiles = await this.getAvailableStagedFiles()
-
-    const recommendedFile = availableFiles.find((file) => file.includes('8.9.2-thinglabs'))
+    const configuredFileName = config.recommendedFirmwareUrl
+      ? basename(new URL(config.recommendedFirmwareUrl).pathname)
+      : null
+    const recommendedFile =
+      (configuredFileName && availableFiles.find((file) => file === configuredFileName)) ||
+      availableFiles.find((file) => file.toLowerCase().endsWith('.zip'))
 
     if (recommendedFile) {
       logger.info(`Selecting recommended file: ${recommendedFile}`)
@@ -445,9 +491,6 @@ export class ThingifyStore
       progressBus.complete(ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD, 'Found installed file')
       return this.getStagedFilePath()
     }
-
-    const recommendedFileId = 'iMktiQXVP4mC5lCe3WRQy'
-    const recommendedFirmwareId = 'Sn_vBLpPfJjic6DZtCj6k'
 
     // Simply handles updating the progress bus with the progress event
     const handleProgress = (progressEvent: ThingifyArchiveDownloadEvent): void => {
@@ -468,75 +511,72 @@ export class ThingifyStore
     this.on('downloadProgress', handleProgress)
 
     try {
-      // Try downloading the file normally
-      await this.downloadFile(recommendedFileId, recommendedFirmwareId)
-      progressBus.complete(ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD)
-    } catch (error) {
-      // try the fallback url
-      logger.error(
-        `Encountered an error downloading the recommended file with ThingifyTools. Using fallback. Error: ${handleError(error)}`,
-        {
-          function: 'downloadRecommendedFirmware',
-          source: 'thingifyStore'
-        }
-      )
-      try {
-        await this.download(this._fallback_firmware_url, '8.9.2-thinglabs-norndis.zip')
-        logger.info('Finished downloading fallback firmware')
-        progressBus.complete(ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD)
-      } catch (error) {
-        // try the staged files
-        logger.error(
-          `Encountered an error downloading the fallback firmware. Error: ${handleError(error)}`,
-          {
+      if (
+        config.firmwareApiUrl &&
+        config.recommendedFirmwareVersionId &&
+        config.recommendedFirmwareFileId
+      ) {
+        try {
+          const version = await this.fetchVersion(config.recommendedFirmwareVersionId)
+          if (!version) {
+            throw new Error('Recommended firmware version was not found')
+          }
+
+          await this.downloadFile(
+            config.recommendedFirmwareVersionId,
+            config.recommendedFirmwareFileId
+          )
+          progressBus.complete(ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD)
+          progressBus.complete(ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD)
+          return this.getStagedFilePath()
+        } catch (error) {
+          logger.warn(`Firmware API download failed: ${handleError(error)}`, {
             function: 'downloadRecommendedFirmware',
             source: 'thingifyStore'
-          }
-        )
-        progressBus.error(
-          ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD,
-          'Error downloading fallback firmware',
-          handleError(error)
-        )
-        const stagedFilePath = this.getStagedFilePath()
-        if (stagedFilePath) return stagedFilePath
-
-        // Now try and see if there are ANY available firmware
-        try {
-          const availableFiles = await this.getAvailableStagedFiles()
-
-          if (availableFiles.length <= 0) {
-            throw new Error('No staged file and fallback firmware failed!')
-          }
-
-          const recommendedFile = availableFiles.find((file) => file.includes('8.9.2-thinglabs'))
-
-          if (recommendedFile) {
-            logger.info(`Selecting recommended file: ${recommendedFile}`)
-            this.setStagedFile(recommendedFile)
-          } else {
-            const fallbackFile = availableFiles[0]
-
-            if (fallbackFile) {
-              logger.info(`Selecting fallback file: ${fallbackFile}`)
-              this.setStagedFile(fallbackFile)
-            } else {
-              throw new Error('No files found matching fallback criteria')
-            }
-          }
-        } catch (error) {
-          progressBus.error(
-            ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD,
-            'Failed to download firmware with both methods and nothing is staged'
-          )
-          logger.warn(
-            'No staged file and both download attempts failed! Upload firmware manually and select it to continue'
-          )
-          throw error
+          })
         }
       }
+
+      if (config.recommendedFirmwareUrl) {
+        try {
+          await this.download(
+            config.recommendedFirmwareUrl,
+            configuredFileName || 'recommended-firmware.zip'
+          )
+          progressBus.complete(ProgressChannel.ST_DEVICE_FIRMWARE_DOWNLOAD)
+          progressBus.complete(ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD)
+          return this.getStagedFilePath()
+        } catch (error) {
+          logger.warn(`Direct firmware download failed: ${handleError(error)}`, {
+            function: 'downloadRecommendedFirmware',
+            source: 'thingifyStore'
+          })
+        }
+      }
+
+      const stagedFiles = await this.getAvailableStagedFiles()
+      const stagedFallback = stagedFiles.find((file) => file.toLowerCase().endsWith('.zip'))
+      if (stagedFallback) {
+        this.setStagedFile(stagedFallback)
+        progressBus.complete(
+          ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD,
+          'Using uploaded firmware archive'
+        )
+        return this.getStagedFilePath()
+      }
+
+      throw new Error(
+        'No recommended firmware source is configured. Upload a firmware zip manually to continue.'
+      )
+    } catch (error) {
+      progressBus.error(
+        ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD,
+        'Unable to obtain recommended firmware',
+        handleError(error)
+      )
+      throw error
+    } finally {
+      this.off('downloadProgress', handleProgress)
     }
-    progressBus.complete(ProgressChannel.ST_THINGIFY_RECOMMENDED_DOWNLOAD)
-    return this.getStagedFilePath()
   }
 }

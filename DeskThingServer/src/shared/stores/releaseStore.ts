@@ -5,7 +5,12 @@ import {
   GitRepoUrl
 } from '@deskthing/types'
 import { StoreInterface } from '@shared/interfaces/storeInterface'
-import { AppLatestServer, ClientLatestServer, GithubRepository, StagedAppManifest } from '@shared/types'
+import {
+  AppLatestServer,
+  ClientLatestServer,
+  GithubRepository,
+  StagedAppManifest
+} from '@shared/types'
 import EventEmitter from 'node:events'
 
 export type AssetAppCacheEntry = {

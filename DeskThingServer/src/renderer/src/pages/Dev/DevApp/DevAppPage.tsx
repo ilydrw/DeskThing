@@ -14,12 +14,12 @@ const DevAppInstructions: React.FC = () => (
       <li>
         <b>Download the Lite Client:</b> Go to{' '}
         <a
-          href="https://github.com/itsriprod/deskthing-liteclient"
+          href="https://github.com/pajowu/superbird-custom-webapp"
           target="_blank"
           rel="noopener noreferrer"
           className="text-emerald-400 underline"
         >
-          https://github.com/itsriprod/deskthing-liteclient
+          Superbird custom webapp starter
         </a>{' '}
         and follow the instructions to add the client to your device.
       </li>
@@ -92,7 +92,7 @@ const DevAppADBControls: React.FC<{
         max={65535}
       />
       <Button
-        className="border group border-cyan-500 hover:bg-cyan-500 flex gap-2"
+        className="border group border-emerald-600 hover:bg-emerald-600 flex gap-2"
         onClick={onForward}
         disabled={loading || !selectedDevice || !devPort}
       >

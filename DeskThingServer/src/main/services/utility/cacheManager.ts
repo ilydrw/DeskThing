@@ -26,10 +26,9 @@ class CacheManager {
       await store.clearCache()
     })
 
-    await Promise.all(promises)
-
-    // Cooldown to let stuff settle
-    await new Promise((resolve) => setTimeout(resolve, 5000))
+    const results = await Promise.allSettled(promises)
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Failed to persist some stores')
 
     const afterMemory = process.memoryUsage()
     const savedHeapUsed = (beforeMemory.heapUsed - afterMemory.heapUsed) / 1024 / 1024

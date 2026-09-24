@@ -13,6 +13,7 @@ let tray: Tray | null = null
  */
 export async function setupTray(): Promise<void> {
   let trayIcon: NativeImage
+  const dock = process.platform === 'darwin' ? app.dock : undefined
 
   if (process.platform === 'darwin') {
     trayIcon = nativeImage.createFromPath(join(__dirname, '../../resources/iconTrayMacSm.png'))
@@ -79,12 +80,16 @@ export async function setupTray(): Promise<void> {
         }
       }
     },
-    ...(process.platform === 'darwin'
+    ...(dock
       ? [
           {
             label: 'Toggle Dock Icon',
             click: (): void => {
-              app.dock.isVisible() ? app.dock.hide() : app.dock.show()
+              if (dock.isVisible()) {
+                dock.hide()
+              } else {
+                void dock.show()
+              }
             },
             id: 'show-hide-icon'
           }

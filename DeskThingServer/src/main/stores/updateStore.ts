@@ -7,6 +7,7 @@ import { LOGGING_LEVELS } from '@deskthing/types'
 import { handleError } from '@server/utils/errorHandler'
 import { app } from 'electron'
 import { satisfies } from 'semver'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 export class UpdateStore
   extends EventEmitter<UpdateStoreEvents>
@@ -16,6 +17,7 @@ export class UpdateStore
   private _updateStatus: UpdateInfoType | null = null
   private _updateProgress: UpdateProgressType | null = null
   private _autoUpdater: AppUpdater | null = null
+  private _checkInProgress: Promise<string> | null = null
 
   get initialized(): boolean {
     return this._initialized
@@ -39,8 +41,33 @@ export class UpdateStore
       function: 'initialize'
     })
 
+    const { updateFeedUrl } = getServiceConfig()
+    if (!app.isPackaged) {
+      Logger.debug('Application updates are disabled for development builds', {
+        source: 'UpdateStore',
+        function: 'initialize'
+      })
+      this._initialized = true
+      return
+    }
+
+    if (!updateFeedUrl) {
+      Logger.info('Application updates are disabled because no update feed is configured', {
+        source: 'UpdateStore',
+        function: 'initialize'
+      })
+      this._initialized = true
+      return
+    }
+
     const { autoUpdater } = electronUpdater
     this._autoUpdater = autoUpdater
+    this._autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: updateFeedUrl
+    })
+    this._autoUpdater.autoDownload = false
+    this._autoUpdater.autoInstallOnAppQuit = true
 
     this._autoUpdater.logger = {
       info: (message): Promise<void> => Logger.info(message, { source: 'AutoUpdater' }),
@@ -88,37 +115,41 @@ export class UpdateStore
       this.emit('update-error', error.message)
     })
 
-    const isDev = process.env.NODE_ENV === 'development'
-    if (!isDev) {
-      this._autoUpdater.setFeedURL({
-        provider: 'github',
-        owner: 'ItsRiprod',
-        repo: 'DeskThing',
-        private: false
-      })
-    }
-
     this._initialized = true
   }
 
   checkForUpdates = async (): Promise<string> => {
-    if (!this._autoUpdater) return 'AutoUpdater not initialized'
+    if (this._checkInProgress) return this._checkInProgress
+
+    this._checkInProgress = this.performUpdateCheck()
+    try {
+      return await this._checkInProgress
+    } finally {
+      this._checkInProgress = null
+    }
+  }
+
+  private performUpdateCheck = async (): Promise<string> => {
+    await this.initialize()
+
+    if (!this._autoUpdater) {
+      return app.isPackaged
+        ? 'Application updates are not configured'
+        : 'Application updates are disabled in development'
+    }
 
     const appVersion = app.getVersion()
 
     try {
-      const downloadNotification = await this._autoUpdater.checkForUpdatesAndNotify()
-      if (
-        downloadNotification &&
-        satisfies(appVersion, `<${downloadNotification.updateInfo.version}`)
-      ) {
+      const updateCheck = await this._autoUpdater.checkForUpdates()
+      if (updateCheck && satisfies(appVersion, `<${updateCheck.updateInfo.version}`)) {
         const updateInfo: UpdateInfoType = {
           updateAvailable: true,
           updateDownloaded: false,
-          version: downloadNotification.updateInfo.version,
-          releaseNotes: downloadNotification.updateInfo.releaseNotes as string,
-          releaseName: downloadNotification.updateInfo.releaseName,
-          releaseDate: downloadNotification.updateInfo.releaseDate
+          version: updateCheck.updateInfo.version,
+          releaseNotes: updateCheck.updateInfo.releaseNotes as string,
+          releaseName: updateCheck.updateInfo.releaseName,
+          releaseDate: updateCheck.updateInfo.releaseDate
         }
         this.setUpdateStatus(updateInfo)
         return 'Update available'
@@ -145,13 +176,16 @@ export class UpdateStore
   }
 
   startDownload = async (): Promise<void> => {
+    await this.initialize()
     if (!this._autoUpdater) return
 
     try {
-      const updateCheck = await this._autoUpdater.checkForUpdates()
-      if (updateCheck) {
-        await this._autoUpdater.downloadUpdate()
+      if (!this._updateStatus?.updateAvailable) {
+        await this.checkForUpdates()
       }
+
+      if (!this._updateStatus?.updateAvailable) return
+      await this._autoUpdater.downloadUpdate()
     } catch (error) {
       const errorMessage = handleError(error)
       const errorStatus: UpdateInfoType = {

@@ -8,12 +8,26 @@ export default async function notarizing(context) {
     return
   }
 
+  // Unsigned validation builds opt out explicitly; release builds fail closed.
+  if (process.env.DESKTHING_SKIP_NOTARIZATION === 'true') {
+    console.log('Skipping notarization: unsigned validation build')
+    return
+  }
+
+  for (const name of ['APPLE_TEAM_ID', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD']) {
+    if (!process.env[name]?.trim()) {
+      throw new Error(
+        `Notarization requires ${name}. Only unsigned validation builds may set DESKTHING_SKIP_NOTARIZATION=true.`
+      )
+    }
+  }
+
   const appName = context.packager.appInfo.productFilename
 
   console.log('Starting notarization process...')
 
   try {
-    const notarizePromise = notarize({
+    await notarize({
       tool: 'notarytool',
       teamId: process.env.APPLE_TEAM_ID,
       appPath: `${appOutDir}/${appName}.app`,
@@ -21,24 +35,8 @@ export default async function notarizing(context) {
       appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD
     })
 
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Notarization timed out after 5 minutes')), 5 * 60 * 1000)
-    })
-
-    await Promise.race([notarizePromise, timeoutPromise])
     console.log('Notarization completed successfully')
   } catch (error) {
-    console.error('Notarization failed:', error)
-    console.error('Error details:', JSON.stringify(error, null, 2))
-    console.error(
-      'Environment variables:',
-      '\nAPPLE_TEAM_ID:',
-      process.env.APPLE_TEAM_ID ? 'Set' : 'Not set',
-      '\nAPPLE_ID:',
-      process.env.APPLE_ID ? 'Set' : 'Not set',
-      'APPLE_APP_SPECIFIC_PASSWORD:',
-      process.env.APPLE_APP_SPECIFIC_PASSWORD ? 'Set' : 'Not set'
-    )
-    console.error('App path:', `${appOutDir}/${appName}.app`)
+    throw new Error(`Notarization failed for ${appName}; packaging aborted.`, { cause: error })
   }
 }

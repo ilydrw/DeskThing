@@ -92,7 +92,7 @@ describe('PlatformStore', () => {
       name: 'Test Platform',
       type: 'test',
       identifier: {
-        capabilities: [ProviderCapabilities.COMMUNICATE],
+        capabilities: [ProviderCapabilities.COMMUNICATE]
       },
       isRunning: vi.fn().mockReturnValue(true),
       start: vi.fn(),
@@ -174,8 +174,55 @@ describe('PlatformStore', () => {
       const updatedClient = { ...testClient, ...clientUpdate }
       await platformStore.updateClient(testClient.clientId, clientUpdate)
 
-      expect(mockPlatform.updateClient).toHaveBeenCalledWith(testClient.clientId, updatedClient, false)
+      expect(mockPlatform.updateClient).toHaveBeenCalledWith(
+        testClient.clientId,
+        updatedClient,
+        false
+      )
     })
+
+    it('keeps one registry entry when the same device connects through another provider', async () => {
+      const websocketPlatform = {
+        ...mockPlatform,
+        id: PlatformIDs.WEBSOCKET,
+        name: 'WebSocket',
+        on: vi.fn(),
+        identifier: {
+          capabilities: [ProviderCapabilities.COMMUNICATE, ProviderCapabilities.PING]
+        }
+      } as unknown as PlatformInterface
+
+      await platformStore.registerPlatform(mockPlatform)
+      await platformStore.registerPlatform(websocketPlatform)
+
+      const adbHandler = (mockPlatform.on as Mock).mock.calls.find(
+        (call) => call[0] === PlatformEvent.CLIENT_CONNECTED
+      )?.[1]
+      const websocketHandler = (websocketPlatform.on as Mock).mock.calls.find(
+        (call) => call[0] === PlatformEvent.CLIENT_CONNECTED
+      )?.[1]
+
+      adbHandler?.(testClient)
+      websocketHandler?.({
+        ...testClient,
+        clientId: 'websocket-session',
+        primaryProviderId: PlatformIDs.WEBSOCKET,
+        identifiers: {
+          [PlatformIDs.WEBSOCKET]: {
+            id: testClient.clientId,
+            providerId: PlatformIDs.WEBSOCKET,
+            active: true,
+            capabilities: [ProviderCapabilities.COMMUNICATE, ProviderCapabilities.PING],
+            connectionState: ConnectionState.Connected
+          }
+        }
+      })
+
+      expect(platformStore.getClients()).toHaveLength(1)
+      expect(platformStore.getClients()[0].identifiers).toHaveProperty(PlatformIDs.ADB)
+      expect(platformStore.getClients()[0].identifiers).toHaveProperty(PlatformIDs.WEBSOCKET)
+    })
+
     it('should broadcast data to all clients', async () => {
       const testData: DeskThingToDeviceCore = {
         app: 'client',

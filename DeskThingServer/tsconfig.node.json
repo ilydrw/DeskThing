@@ -8,6 +8,7 @@
     "src/main/processes/**/*",
     "test/**/*.ts"
   ],
+  "exclude": ["test/renderer/**/*"],
   "compilerOptions": {
     "target": "ESNext",
     "useDefineForClassFields": true,

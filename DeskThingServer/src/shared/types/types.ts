@@ -33,6 +33,7 @@ export type Settings = {
   flag_firstClose: boolean
   flag_hasOpened: boolean
   flag_collectStats: boolean
+  privacy_statsConsentVersion: number
   flag_nerd?: boolean
   flag_misc?: Record<string, boolean>
 }
@@ -51,7 +52,6 @@ export enum LOG_CONTEXTS {
 }
 
 export type LoggingOptions = {
-
   context?: LOG_CONTEXTS // require the context now - assumed server unless otherwise specified
 
   store?: string // optional store

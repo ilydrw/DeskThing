@@ -1,19 +1,15 @@
-
 import { updateLoadingStatus } from '@server/windows/loadingWindow'
 import { Settings } from '@shared/types'
-import { app } from 'electron'
-import { readFile } from 'fs/promises'
-import { join } from 'path'
+import { readFromFile } from '@server/services/files/fileService'
+import { assertRecord } from '@shared/validation/settings'
 
 export const checkFlag = async (flagKey: keyof Settings): Promise<boolean> => {
-  const settingsPath = join(app.getPath('userData'), 'settings.json')
-
-  updateLoadingStatus(`Checking flag: ${flagKey}`)
+  await updateLoadingStatus(`Checking flag: ${flagKey}`)
   try {
-    const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as Settings
+    const settings = await readFromFile<Settings>('settings.json', assertRecord)
     return settings?.[flagKey] === true
   } catch (error) {
-    updateLoadingStatus('Settings file not found', error)
+    await updateLoadingStatus('Unable to read startup preference; using default', error)
     return false
   }
 }

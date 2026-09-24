@@ -36,8 +36,8 @@ export const RepoCard: FC<RepoCardProps> = ({ repo, onAdd, isLoading, isAdded, i
 
   return (
     <div
-      className={`flex flex-row items-center gap-4 p-4 border rounded-lg transition-all duration-300 bg-zinc-950
-        ${isAdded ? 'border-emerald-500 shadow-emerald-500/40' : 'cursor-pointer border-zinc-900 hover:border-emerald-400 hover:shadow-emerald-500/20'}
+      className={`flex flex-row items-center gap-4 p-4 border rounded-lg transition-colors duration-150 bg-zinc-950/40
+        ${isAdded ? 'border-emerald-700' : 'cursor-pointer border-zinc-800 hover:border-zinc-600'}
         ${isLoading ? 'opacity-60 pointer-events-none' : ''}
       `}
       onClick={handleClick}
@@ -69,7 +69,7 @@ export const RepoCard: FC<RepoCardProps> = ({ repo, onAdd, isLoading, isAdded, i
       </div>
       <Button
         title={isAdded ? 'Added' : 'Add'}
-        className={`ml-4 px-3 py-1 flex items-center gap-2 transition-all duration-300
+        className={`ml-4 px-3 py-1 flex items-center gap-2 transition-colors duration-150
           ${isAdded ? 'bg-emerald-900 text-emerald-300' : 'hover:bg-zinc-800'}
           rounded font-semibold`}
         disabled={isAdded || isLoading}
@@ -80,7 +80,7 @@ export const RepoCard: FC<RepoCardProps> = ({ repo, onAdd, isLoading, isAdded, i
       {isAdded && id && (
         <Button
           title={'Go to downloads page'}
-          className={`ml-4 px-3 py-1 flex items-center gap-2 transition-all duration-300
+          className={`ml-4 px-3 py-1 flex items-center gap-2 transition-colors duration-150
           ${'hover:bg-zinc-800'}
           rounded font-semibold`}
           disabled={isLoading}

@@ -1,5 +1,7 @@
 import { Client, ConnectionState, ClientPlatformIDs } from '@deskthing/types'
 import { FC, useEffect, useState } from 'react'
+import Button from '@renderer/components/Button'
+import useClientStore, { findKnownDeviceForClient } from '@renderer/stores/clientStore'
 
 type DeviceDetailsProps = {
   client: Client
@@ -7,6 +9,16 @@ type DeviceDetailsProps = {
 
 export const DeviceDetails: FC<DeviceDetailsProps> = ({ client }) => {
   const [connectedTimeText, setConnectedTimeText] = useState<string>('0s')
+  const [deviceName, setDeviceName] = useState('')
+  const [isSavingName, setIsSavingName] = useState(false)
+  const knownDevices = useClientStore((state) => state.knownDevices)
+  const renameDevice = useClientStore((state) => state.renameDevice)
+  const forgetDevice = useClientStore((state) => state.forgetDevice)
+  const knownDevice = findKnownDeviceForClient(client, knownDevices)
+
+  useEffect(() => {
+    setDeviceName(knownDevice?.displayName || '')
+  }, [knownDevice?.displayName])
 
   useEffect(() => {
     const updateTime = (): number | undefined => {
@@ -43,9 +55,94 @@ export const DeviceDetails: FC<DeviceDetailsProps> = ({ client }) => {
     return () => clearInterval(timer)
   }, [client.timestamp])
 
+  const saveDeviceName = async (): Promise<void> => {
+    setIsSavingName(true)
+    try {
+      const renamed = await renameDevice(client.clientId, deviceName)
+      setDeviceName(renamed?.displayName || '')
+    } finally {
+      setIsSavingName(false)
+    }
+  }
+
+  const resetDeviceName = async (): Promise<void> => {
+    setIsSavingName(true)
+    try {
+      await renameDevice(client.clientId, undefined)
+      setDeviceName('')
+    } finally {
+      setIsSavingName(false)
+    }
+  }
+
+  const forgetKnownDevice = async (): Promise<void> => {
+    const confirmed = window.confirm(
+      'Forget this saved device? Its friendly name and connection history will be removed.'
+    )
+    if (!confirmed) return
+
+    setIsSavingName(true)
+    try {
+      await forgetDevice(client.clientId)
+      setDeviceName('')
+    } finally {
+      setIsSavingName(false)
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-zinc-950 p-6">
       <div className="flex h-full flex-col gap-6">
+        <section className="bg-zinc-800 rounded-lg p-6 shadow-lg">
+          <h2 className="text-xl font-semibold mb-4">Device Identity</h2>
+          <form
+            className="flex flex-col sm:flex-row gap-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveDeviceName()
+            }}
+          >
+            <input
+              value={deviceName}
+              maxLength={64}
+              onChange={(event) => setDeviceName(event.target.value)}
+              placeholder={client.manifest?.context.name || client.manifest?.name || 'Device name'}
+              aria-label="Device name"
+              className="flex-1 px-4 py-2 bg-zinc-900 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+            />
+            <Button
+              type="submit"
+              disabled={isSavingName}
+              className="bg-blue-700 hover:bg-blue-600 px-4"
+            >
+              {isSavingName ? 'Saving...' : 'Save Name'}
+            </Button>
+            {knownDevice?.displayName && (
+              <Button
+                type="button"
+                disabled={isSavingName}
+                onClick={() => void resetDeviceName()}
+                className="bg-zinc-700 hover:bg-zinc-600 px-4"
+              >
+                Reset Name
+              </Button>
+            )}
+          </form>
+          {knownDevice && (
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-zinc-400">
+              <span>First seen: {new Date(knownDevice.firstSeenAt).toLocaleString()}</span>
+              <span>Last seen: {new Date(knownDevice.lastSeenAt).toLocaleString()}</span>
+              <Button
+                type="button"
+                disabled={isSavingName}
+                onClick={() => void forgetKnownDevice()}
+                className="text-red-400 hover:text-red-300 p-0"
+              >
+                Forget saved device
+              </Button>
+            </div>
+          )}
+        </section>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <section className="bg-zinc-800 rounded-lg p-6 shadow-lg">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">

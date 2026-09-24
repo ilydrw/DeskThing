@@ -9,6 +9,7 @@ import {
   PaginatedResponse
 } from '@shared/types/supporter'
 import { SupporterStoreClass } from '@shared/stores/supporterStore'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 type SupporterCachePage = {
   timestamp: number
@@ -22,7 +23,7 @@ export class SupporterStore implements SupporterStoreClass, CacheableStore {
   private readonly CACHE_DURATION = 1 * 60 * 60 * 1000 // 1 hour
   private readonly API_URL = 'https://developers.buymeacoffee.com/api/v1/supporters'
   private readonly MEMBERS_API_URL = 'https://developers.buymeacoffee.com/api/v1/subscriptions'
-  private readonly TOKEN = process.env.BUYMEACOFFEE_TOKEN
+  private readonly TOKEN = getServiceConfig().supporterToken
 
   private _initialized: boolean = false
   public get initialized(): boolean {
@@ -115,6 +116,20 @@ export class SupporterStore implements SupporterStoreClass, CacheableStore {
   }
 
   async fetchSupporters(opts: SupporterFetchOptions): Promise<PaginatedResponse<SupporterData>> {
+    if (!this.TOKEN) {
+      logger.debug('Supporter integration is not configured', {
+        function: 'fetchSupporters',
+        source: 'supporterStore'
+      })
+      return {
+        items: [],
+        total: 0,
+        page: opts.page,
+        totalPages: 0,
+        hasMore: false
+      }
+    }
+
     try {
       logger.debug('Checking cache for supporters')
       const cachedResponse = await this.checkCache(opts)

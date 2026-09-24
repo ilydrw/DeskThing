@@ -2,17 +2,18 @@ import { ClientConnectionMethod, LOGGING_LEVELS } from '@deskthing/types'
 import { storeProvider } from '@server/stores/storeProvider'
 import { handleError } from '@server/utils/errorHandler'
 import logger from '@server/utils/logger'
-import { DiscordWebhookData, FeedbackReport, FeedbackResult, FeedbackType, SystemInfo } from '@shared/types'
+import {
+  DiscordWebhookData,
+  FeedbackReport,
+  FeedbackResult,
+  FeedbackType,
+  SystemInfo
+} from '@shared/types'
 import os from 'os'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 export class FeedbackService {
   private static readonly SUBMISSION_ID = Math.floor(Math.random() * 900) + 100
-
-  /**
-   * This will be updated later for an actual webhook edge server smth smth fancy instead of directly to the discord channel
-   * If you could be a real one and not abuse this, that would be awesome. Thanks!
-   */
-  private static readonly WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || 'fallback-webhook-url'
 
   private static readonly TYPE_COLORS: Record<FeedbackType, number> = {
     bug: 0xff0000,
@@ -35,9 +36,18 @@ export class FeedbackService {
   }
 
   static async sendFeedback(report: FeedbackReport): Promise<FeedbackResult> {
-    const systemInfo = report.type === 'bug' || report.type === 'other' ? report.feedback : null
+    const { feedbackUrl } = getServiceConfig()
+    if (!feedbackUrl) {
+      return {
+        message: 'Feedback submission is unavailable in this build',
+        success: false,
+        error: 'No feedback service is configured'
+      }
+    }
 
-    const enrichedReport = await this.enrichFeedbackData(report)
+    const includeSystemInfo = report.type === 'bug' || report.type === 'other'
+    const systemInfo = includeSystemInfo ? await this.collectSystemInfo() : null
+    const enrichedReport = this.enrichFeedbackData(report, systemInfo)
 
     const message: DiscordWebhookData = {
       content: `[${this.SUBMISSION_ID}] **New ${report.type.toUpperCase()} Feedback** ${this.getEmojiForType(report.type)}`,
@@ -49,16 +59,19 @@ export class FeedbackService {
           author: {
             name: enrichedReport.feedback.discordId || 'Anonymous User'
           },
-          fields: await this.generateFields(enrichedReport, systemInfo),
+          fields: this.generateFields(enrichedReport, systemInfo),
           timestamp: new Date().toISOString()
         }
       ]
     }
 
-    logger.debug(`Sending feedback to Discord: ${JSON.stringify(message)}`)
+    logger.debug(`Submitting ${report.type} feedback`, {
+      source: 'feedbackService',
+      function: 'sendFeedback'
+    })
 
     try {
-      const response = await fetch(this.WEBHOOK_URL, {
+      const response = await fetch(feedbackUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -83,30 +96,31 @@ export class FeedbackService {
     }
   }
 
-  private static async enrichFeedbackData(report: FeedbackReport): Promise<FeedbackReport> {
+  private static enrichFeedbackData(
+    report: FeedbackReport,
+    systemInfo: SystemInfo | null
+  ): FeedbackReport {
     // Enrich basic fields
     report.feedback.timestamp = report.feedback.timestamp || new Date().toISOString()
 
     // System information
-    if (report.type === 'bug' || report.type === 'other') {
-      const sysInfo = await this.collectSystemInfo()
-
+    if ((report.type === 'bug' || report.type === 'other') && systemInfo) {
       report.feedback.serverVersion =
-        report.feedback.serverVersion || sysInfo.serverVersion || '0.0.0'
+        report.feedback.serverVersion || systemInfo.serverVersion || '0.0.0'
       report.feedback.clientVersion =
-        report.feedback.clientVersion || sysInfo.clientVersion || '0.0.0'
-      report.feedback.os = report.feedback.os || sysInfo.os
-      report.feedback.cpu = report.feedback.cpu || sysInfo.cpu
-      report.feedback.uptime = report.feedback.uptime || sysInfo.uptime
+        report.feedback.clientVersion || systemInfo.clientVersion || '0.0.0'
+      report.feedback.os = report.feedback.os || systemInfo.os
+      report.feedback.cpu = report.feedback.cpu || systemInfo.cpu
+      report.feedback.uptime = report.feedback.uptime || systemInfo.uptime
 
       // Get running apps information
       if (!report.feedback.apps || report.feedback.apps.length === 0) {
-        report.feedback.apps = sysInfo.apps
+        report.feedback.apps = systemInfo.apps
       }
 
       // Get connected clients
       if (!report.feedback.clients || report.feedback.clients.length === 0) {
-        report.feedback.clients = sysInfo.clients
+        report.feedback.clients = systemInfo.clients
       }
 
       // Set default reproduce steps if none provided
@@ -124,7 +138,7 @@ export class FeedbackService {
     const clientStore = await storeProvider.getStore('clientStore')
 
     const systemInfo: SystemInfo = {
-      serverVersion: 'v' + process.env.PACKAGE_VERSION || '0.0.0',
+      serverVersion: `v${process.env.PACKAGE_VERSION || '0.0.0'}`,
       clientVersion: (await clientStore.getClient())?.version || '0.0.0',
       os: `${os.platform()} ${os.release()}`,
       cpu: os.cpus()[0].model,
@@ -195,12 +209,11 @@ export class FeedbackService {
     return hours > 0 ? `${hours}h` : minutes > 0 ? `${minutes}m` : `${seconds}s`
   }
 
-  private static async generateFields(
+  private static generateFields(
     report: FeedbackReport,
     feedbackSysInfo: SystemInfo | null
-  ): Promise<Array<{ name: string; value: string; inline: boolean }>> {
-    const systemInfo = { ...(await this.collectSystemInfo()), ...feedbackSysInfo }
-
+  ): Array<{ name: string; value: string; inline: boolean }> {
+    let systemInfo: SystemInfo | null = null
     const fields = [
       {
         name: 'Timestamp',
@@ -208,7 +221,7 @@ export class FeedbackService {
         inline: true
       },
       {
-        name: 'Discord ID',
+        name: 'Contact',
         value: report.feedback.discordId || 'Not provided',
         inline: true
       },
@@ -221,6 +234,8 @@ export class FeedbackService {
 
     if (report.type === 'bug' || report.type === 'other') {
       const detailedInfo = report.feedback
+      systemInfo = feedbackSysInfo ? { ...feedbackSysInfo, ...detailedInfo } : detailedInfo
+
       fields.push(
         {
           name: 'Steps to Reproduce',

@@ -153,10 +153,10 @@ const AddReleaseModal: FC = () => {
   return (
     <Overlay
       onClose={onClose}
-      className="flex flex-col bg-zinc-950 rounded-xl w-[95vw] max-h-[90vh] max-w-3xl border border-zinc-900 shadow-emerald-500/20"
+      className="flex flex-col bg-zinc-950 rounded-xl w-[95vw] max-h-[90vh] max-w-3xl border border-zinc-800"
     >
       <div className="flex flex-col items-center justify-center py-6 px-6">
-        <h2 className="text-2xl font-bold text-emerald-400 mb-2">Add a Release</h2>
+        <h2 className="text-xl font-semibold text-zinc-100 mb-2">Add a release</h2>
         <p className="text-sm text-zinc-400 mb-4 text-center">
           Select a repository to add as a release. Only public repositories are shown.
         </p>

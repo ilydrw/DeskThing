@@ -15,7 +15,6 @@ const WebSocketControls: React.FC<WebSocketControlsProps> = ({ client }) => {
   const ping = usePlatformStore((state) => state.ping)
   const is_nerd = useSettingsStore((state) => state.settings?.flag_nerd || false)
 
-  
   const handlePing = async (): Promise<void> => {
     setAnimatingIcons((prev) => ({ ...prev, ping: true }))
     await ping(client.clientId)

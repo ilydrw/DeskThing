@@ -14,6 +14,16 @@ import { v4 as uuidv4 } from 'uuid'
 import defaultProfile from '@server/static/defaultProfile'
 import { storeProvider } from './storeProvider'
 import { defaultMappingProfile } from '@server/static/defaultButtons'
+import { isRecord } from '@shared/validation/settings'
+
+const validateProfileFile = (value: unknown): void => {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || typeof value.version !== 'string' ||
+    typeof value.enabled !== 'boolean' ||
+    (value.clientConfig !== undefined && !isRecord(value.clientConfig)) ||
+    (value.mapping !== undefined && (!isRecord(value.mapping) || !isRecord(value.mapping.mapping)))) {
+    throw new Error('Invalid profile data')
+  }
+}
 
 const PROFILE_FILE_PATH = 'profiles/profile.json'
 
@@ -70,7 +80,7 @@ export class ProfileStore
             source: 'profileStore'
           })
 
-          this.updateProfile({ clientConfig: data.payload })
+          await this.updateProfile({ clientConfig: data.payload })
         }
 
         if (data.type === DEVICE_DESKTHING.CONFIG && data.request === 'get') {
@@ -115,10 +125,10 @@ export class ProfileStore
 
   private async loadFromFile(): Promise<void> {
     try {
-      this._profile = await readFromFile<DeskThingProfile>(PROFILE_FILE_PATH)
+      this._profile = await readFromFile<DeskThingProfile>(PROFILE_FILE_PATH, validateProfileFile)
 
       if (!this._profile) {
-        this._profile = defaultProfile
+        this._profile = structuredClone(defaultProfile)
         logger.debug('No profile loaded. Loading Default', {
           function: 'loadFromFile',
           source: 'profileStore'
@@ -137,7 +147,7 @@ export class ProfileStore
         function: 'loadFromFile',
         source: 'profileStore'
       })
-      this._profile = defaultProfile
+      this._profile = structuredClone(defaultProfile)
     }
   }
 
@@ -199,7 +209,7 @@ export class ProfileStore
   }
 
   async deleteProfile(): Promise<boolean> {
-    this._profile = undefined
+    this._profile = structuredClone(defaultProfile)
     await this.saveToFile()
     return true
   }
@@ -232,7 +242,7 @@ export class ProfileStore
 
       if (profile && mapping) {
         if (!profile.mapping) {
-          profile.mapping = defaultMappingProfile
+          profile.mapping = structuredClone(defaultMappingProfile)
         }
 
         profile.mapping.mapping = mapping.mapping

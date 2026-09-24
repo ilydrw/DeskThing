@@ -18,7 +18,7 @@ const Papertrail: React.FC = () => {
   }
 
   return (
-    <div className="w-full hxs:block hidden bg-neutral-950 border-b border-b-neutral-900 text-xs p-1 font-geistMono text-gray-500">
+    <div className="papertrail w-full hxs:block hidden text-[10px] font-geistMono">
       {trail.map((item, index) => (
         <React.Fragment key={index}>
           <span>

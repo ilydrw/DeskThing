@@ -11,7 +11,7 @@ export type SidebarView = 'home' | 'apps' | 'client' | 'dev'
 
 function App(): JSX.Element {
   return (
-    <div className="bg-black">
+    <div className="app-shell">
       <div className="h-screen w-screen text-white">
         <ErrorBoundary>
           <StoreProvider />

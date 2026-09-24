@@ -56,9 +56,9 @@ export const FileSelection: FC = () => {
 
   return (
     <div className="mb-4 flex flex-col justify-center items-center gap-4">
-            <div className="w-full flex justify-center">
-            <h1 className="text-xl">Upload Local Firmware</h1>
-            </div>
+      <div className="w-full flex justify-center">
+        <h1 className="text-xl">Upload Local Firmware</h1>
+      </div>
       <div className="flex justify-center gap-2">
         <Button
           onClick={handleUploadClick}

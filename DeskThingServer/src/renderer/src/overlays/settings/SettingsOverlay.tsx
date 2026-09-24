@@ -54,17 +54,14 @@ const SettingsOverlay: React.FC = () => {
     }
   }, [currentPage, setCurrentPage])
 
-
   return (
-    <Overlay
-      onClose={onClose}
-      className="border border-gray-500 w-5/6 h-5/6 flex flex-col overflow-hidden"
-    >
-      <div className="w-full py-4 bg-zinc-900 px-5 border-b border-gray-500">
-        <h1 className="font-semibold text-2xl">Settings</h1>
+    <Overlay onClose={onClose} className="w-5/6 h-5/6 max-w-6xl flex flex-col overflow-hidden">
+      <div className="w-full px-5 py-4 border-b border-zinc-800 bg-zinc-950/20">
+        <p className="page-eyebrow">DeskThing</p>
+        <h1 className="font-semibold tracking-tight text-xl">Settings</h1>
       </div>
       <div className="flex h-full">
-        <div className="border-r border-gray-500 p-2 bg-zinc-900 flex flex-col gap-2">
+        <div className="w-20 md:w-44 border-r border-zinc-800 p-3 bg-zinc-950/20 flex flex-col gap-1">
           {settingsPages.map(({ key, label, Icon }) => (
             <SettingsComponent
               key={key}
@@ -76,7 +73,7 @@ const SettingsOverlay: React.FC = () => {
             />
           ))}
         </div>
-        <div className="w-full relative overflow-y-auto">
+        <div className="w-full relative overflow-y-auto bg-zinc-950/10">
           <ErrorBoundary>
             {currentPage == 'client' && <ClientSettings />}
             {currentPage == 'server' && <ServerSettings />}
@@ -107,7 +104,7 @@ const SettingsComponent = ({
 }: SettingsComponentProps): React.ReactElement => (
   <Button
     onClick={() => setPage(page)}
-    className={`gap-2 ${curPage == page ? 'bg-zinc-800 hover:bg-zinc-700' : 'bg-zinc-900 hover:bg-zinc-800'}`}
+    className={`gap-2 w-full ${curPage == page ? 'border-zinc-700 bg-zinc-800/70 text-zinc-100' : 'hover:bg-zinc-800/50 text-zinc-400'}`}
   >
     {Icon && <Icon strokeWidth={2} />}
     <p className="hidden md:block">{label}</p>

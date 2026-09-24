@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import Sidebar from '@renderer/nav/Sidebar'
 import Button from '@renderer/components/Button'
-import { IconLink, IconRefresh, IconPlus } from '@renderer/assets/icons'
+import { IconCarThingSmall, IconLink, IconRefresh, IconPlus } from '@renderer/assets/icons'
 import { useClientStore, useReleaseStore, usePageStore } from '@renderer/stores'
 import MainElement from '@renderer/nav/MainElement'
 import { ProgressChannel } from '@shared/types'
@@ -10,8 +10,7 @@ import { useChannelProgress } from '@renderer/hooks/useProgress'
 import AddRepoOverlay from '@renderer/overlays/releases/AddRepoOverlay'
 import { DownloadErrorOverlay } from '@renderer/overlays/DownloadErrorOverlay'
 import { AddCard } from './AddCard'
-
-let initialRender = true
+import PageHeader from '@renderer/components/PageHeader'
 
 const ClientDownloads: React.FC = () => {
   const clientReleases = useReleaseStore((releaseStore) => releaseStore.clientReleases)
@@ -26,39 +25,48 @@ const ClientDownloads: React.FC = () => {
 
   const [addClientOverlay, setAddClientOverlay] = useState(false)
   const [clientLoadError, setClientLoadError] = useState<string | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const fetching = useRef(false)
 
   const [loading, setLoading] = useState(false)
   const [uiState, setUiState] = useState({
-    refreshingClients: false
+    refreshingClients: true
   })
 
-  if (initialRender) {
-    getClients()
-    initialRender = false
-  }
+  const loadClients = useCallback(
+    async (force = false, readManifest = false): Promise<void> => {
+      if (fetching.current) return
+      fetching.current = true
+      setUiState((prev) => ({ ...prev, refreshingClients: true }))
+      setCatalogError(null)
+      try {
+        if (force) await refresh(true)
+        await getClients()
+        if (readManifest) await refreshClient()
+      } catch {
+        setCatalogError(
+          'Could not load client releases. Check your connection and repository, then try again.'
+        )
+      } finally {
+        fetching.current = false
+        setUiState((prev) => ({ ...prev, refreshingClients: false }))
+      }
+    },
+    [getClients, refresh, refreshClient]
+  )
 
-  const retrieveClients = async (): Promise<void> => {
-    setUiState((prev) => ({
-      ...prev,
-      refreshingClients: true
-    }))
-    await getClients()
-    await refreshClient()
-    await refresh(false) // dont force
-    setUiState((prev) => ({
-      ...prev,
-      refreshingClients: false
-    }))
-  }
+  useEffect(() => {
+    void loadClients()
+  }, [loadClients])
+
+  const retrieveClients = (): Promise<void> => loadClients(true, true)
 
   const loadClientZip = async (zip: string): Promise<void> => {
     setLoading(true)
     setClientLoadError(null)
     try {
       const result = await clientZip(zip)
-      if (result.success) {
-        // Handle successful client zip loading
-      } else {
+      if (!result.success) {
         setClientLoadError(result.message || 'Unknown error during client zip loading')
       }
     } catch (error) {
@@ -77,25 +85,7 @@ const ClientDownloads: React.FC = () => {
     setPage('Downloads/App')
   }
 
-  const handleRefreshData = async (): Promise<void> => {
-    if (!uiState.refreshingClients) {
-      setUiState((prev) => ({
-        ...prev,
-        refreshingClients: true
-      }))
-      await refresh(true)
-      await refreshClient()
-      setTimeout(
-        () => {
-          setUiState((prev) => ({
-            ...prev,
-            refreshingClients: false
-          }))
-        },
-        Math.random() * 2000 + 1500
-      )
-    }
-  }
+  const handleRefreshData = (): Promise<void> => loadClients(true)
 
   const handleToggleAddRepo = (): void => {
     setAddClientOverlay((state) => !state)
@@ -134,7 +124,7 @@ const ClientDownloads: React.FC = () => {
               </div>
             </div>
           ) : (
-            <p>Client Not Found!</p>
+            <p>No device software installed yet.</p>
           )}
         </div>
         <div>
@@ -163,41 +153,92 @@ const ClientDownloads: React.FC = () => {
           </div>
         </div>
       </Sidebar>
-      <MainElement className="p-4">
-        <div className="w-full h-full relative overflow-y-auto flex flex-col">
-          <div className="absolute inset w-full h-fit grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 grid-flow-dense p-4">
-            {clientReleases && clientReleases.length > 0 ? (
-              <>
-                {clientReleases.map((release) => (
-                  <ClientDownloadCard
-                    key={release.id}
-                    clientRelease={release}
-                    loading={loading}
-                    setLoading={setLoading}
-                  />
-                ))}
-                <AddCard />
-              </>
-            ) : (
-              <div className="w-full h-full flex flex-col justify-center items-center col-span-full">
-                <h1 className="text-2xl font-semibold">Uh oh-</h1>
-                <p>Unable to find or fetch releases</p>
-                <Button
-                  onClick={retrieveClients}
-                  className="mt-4 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-400 text-white font-semibold flex items-center gap-2 shadow transition-all duration-200"
-                >
-                  <IconRefresh
-                    strokeWidth={1.5}
-                    className={`${uiState.refreshingClients ? 'animate-spin-smooth' : ''}`}
-                  />
-                  <span className="md:block xs:hidden xs:text-center flex-grow">Retry</span>
-                </Button>
-                <p className="text-sm text-gray-500 italic text-center">
-                  Check the logs for a potential reason. You might have hit the Github API limit.
-                  Try again later or add a repo in settings!
-                </p>
-              </div>
+      <MainElement>
+        <div className="page-scroll">
+          <div className="page-frame">
+            <PageHeader
+              eyebrow="Downloads"
+              title="Client downloads"
+              description="Download or add DeskThing client releases."
+              actions={
+                <>
+                  <Button
+                    disabled={uiState.refreshingClients}
+                    onClick={handleRefreshData}
+                    className="action-button"
+                  >
+                    <IconRefresh
+                      className={uiState.refreshingClients ? 'animate-spin-smooth' : ''}
+                    />
+                    Refresh
+                  </Button>
+                  <Button
+                    onClick={handleToggleAddRepo}
+                    className="action-button action-button-primary"
+                  >
+                    <IconPlus />
+                    Add client
+                  </Button>
+                </>
+              }
+            />
+            {catalogError && (
+              <p role="alert" className="mb-4 text-sm text-amber-200">
+                {catalogError}
+              </p>
             )}
+            <div
+              aria-busy={uiState.refreshingClients}
+              className="w-full h-fit grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 grid-flow-dense"
+            >
+              {clientReleases && clientReleases.length > 0 ? (
+                <>
+                  {clientReleases.map((release) => (
+                    <ClientDownloadCard
+                      key={release.id}
+                      clientRelease={release}
+                      loading={loading}
+                      setLoading={setLoading}
+                    />
+                  ))}
+                  <AddCard />
+                </>
+              ) : (
+                <div className="empty-state col-span-full">
+                  <div className="max-w-md">
+                    <div className="empty-state-icon">
+                      <IconCarThingSmall iconSize={36} />
+                    </div>
+                    <h2 className="text-xl font-semibold tracking-tight">
+                      {uiState.refreshingClients
+                        ? 'Loading client releases'
+                        : catalogError
+                          ? 'Catalog unavailable'
+                          : 'No client releases available'}
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      {uiState.refreshingClients
+                        ? 'Checking available device software…'
+                        : 'Add a trusted repository or import a client ZIP to get started. If you already added a repository, refresh to check for releases.'}
+                    </p>
+                    <Button
+                      onClick={handleRefreshData}
+                      disabled={uiState.refreshingClients}
+                      className="action-button action-button-primary mx-auto mt-5"
+                    >
+                      <IconRefresh
+                        strokeWidth={1.5}
+                        className={`${uiState.refreshingClients ? 'animate-spin-smooth' : ''}`}
+                      />
+                      <span>{uiState.refreshingClients ? 'Loading' : 'Refresh releases'}</span>
+                    </Button>
+                    <Button onClick={handleToggleAddRepo} className="action-button mx-auto mt-2">
+                      <IconPlus /> Add repository or ZIP
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {clientLoadError && (

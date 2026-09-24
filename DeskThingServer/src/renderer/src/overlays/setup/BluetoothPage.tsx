@@ -1,4 +1,3 @@
-import SponsorButton from '@renderer/components/SponsorButton'
 import React from 'react'
 
 const BluetoothPage: React.FC = () => {
@@ -13,10 +12,11 @@ const BluetoothPage: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-col items-center bg-gray-800 p-8 rounded-lg shadow-lg border border-green-500/20 transition-shadow hover:shadow-green-500/20 hover:shadow-xl">
-          <p className="text-lg text-gray-300">Support the development of deskthing</p>
-          <SponsorButton />
-          <p className="text-gray-400 italic">Your support helps keep this project alive</p>
-        </div>{' '}
+          <p className="text-lg text-gray-300">Bluetooth planning is tracked in the roadmap.</p>
+          <p className="text-gray-400 italic">
+            USB and local-network reliability remain the current priority.
+          </p>
+        </div>
       </div>
     </div>
   )

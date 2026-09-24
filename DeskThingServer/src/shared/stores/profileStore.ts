@@ -26,7 +26,6 @@ export interface ProfileStoreEvents {
 }
 
 export interface ProfileStoreClass extends StoreInterface {
-
   getActiveProfile(): Promise<DeskThingProfile | undefined>
 
   /**

@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import Sidebar from '@renderer/nav/Sidebar'
 import Button from '@renderer/components/Button'
-import { IconLink, IconPlus, IconRefresh } from '@renderer/assets/icons'
+import { IconLayoutgrid, IconLink, IconPlus, IconRefresh } from '@renderer/assets/icons'
 import { useAppStore, useReleaseStore, usePageStore } from '@renderer/stores'
 import MainElement from '@renderer/nav/MainElement'
 import { SuccessNotification } from '@renderer/overlays/SuccessNotification'
@@ -11,9 +11,7 @@ import { AppReleaseCard } from './AppDownloadCard'
 import { useChannelProgress } from '@renderer/hooks/useProgress'
 import { DownloadErrorOverlay } from '@renderer/overlays/DownloadErrorOverlay'
 import { AddCard } from './AddCard'
-
-// Defined outside scope so it persists between being unmounted and not
-let initialRender = true
+import PageHeader from '@renderer/components/PageHeader'
 
 /**
  * The `AppDownloads` component is responsible for rendering the downloads page of the application. It displays a list of available app downloads, allows users to upload their own app, and provides a link to the client downloads page.
@@ -35,20 +33,16 @@ const AppDownloads: React.FC = () => {
   const addApp = useAppStore((appStore) => appStore.addApp)
 
   const [addAppError, setAddAppError] = useState<string | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const fetching = useRef(false)
 
   useChannelProgress(ProgressChannel.IPC_APPS)
   useChannelProgress(ProgressChannel.IPC_RELEASES)
 
   const [uiState, setUiState] = useState({
     showCommunity: false,
-    refreshingApps: false
+    refreshingApps: true
   })
-
-  // Because of how React works, this will only run once due to the global initialRender function only ever being loaded once and then persisting
-  if (initialRender) {
-    getApps()
-    initialRender = false
-  }
 
   const [addAppRepoOverlay, setAddAppRepoOverlay] = useState(false)
 
@@ -58,41 +52,44 @@ const AppDownloads: React.FC = () => {
     setPage('Downloads/Client')
   }
 
-  const fetchApps = async (): Promise<void> => {
-    setUiState((prev) => ({
-      ...prev,
-      refreshingApps: true
-    }))
-    await getApps()
-    setUiState((prev) => ({
-      ...prev,
-      refreshingApps: false
-    }))
-  }
+  const loadApps = useCallback(
+    async (force = false): Promise<void> => {
+      if (fetching.current) return
+      fetching.current = true
+      setUiState((prev) => ({ ...prev, refreshingApps: true }))
+      setCatalogError(null)
+      try {
+        if (force) await refreshReleases(true)
+        await getApps()
+      } catch {
+        setCatalogError(
+          'Could not load app releases. Check your connection and repository, then try again.'
+        )
+      } finally {
+        fetching.current = false
+        setUiState((prev) => ({ ...prev, refreshingApps: false }))
+      }
+    },
+    [getApps, refreshReleases]
+  )
 
-  const handleRefreshData = async (): Promise<void> => {
-    if (!uiState.refreshingApps) {
-      setUiState((prev) => ({
-        ...prev,
-        refreshingApps: true
-      }))
-      await refreshReleases(true)
-      setTimeout(
-        () => {
-          setUiState((prev) => ({
-            ...prev,
-            refreshingApps: false
-          }))
-        },
-        Math.random() * 2000 + 1500
-      )
-    }
-  }
+  useEffect(() => {
+    void loadApps()
+  }, [loadApps])
+
+  const handleRefreshData = (): Promise<void> => loadApps(true)
 
   const onZipAdd = async (fileUrl: string): Promise<void> => {
-    const downloadResult = await addApp({ appPath: fileUrl })
-    if (!downloadResult.success) {
-      setAddAppError(downloadResult.message || 'Failed to add app from ZIP file.')
+    setAddAppError(null)
+    try {
+      const downloadResult = await addApp({ appPath: fileUrl })
+      if (!downloadResult.success) {
+        setAddAppError(downloadResult.message || 'Failed to add app from ZIP file.')
+      }
+    } catch {
+      setAddAppError(
+        'Could not import the app ZIP. Check that the file is accessible and try again.'
+      )
     }
   }
 
@@ -131,36 +128,85 @@ const AppDownloads: React.FC = () => {
           </div>
         </div>
       </Sidebar>
-      <MainElement className="p-4">
-        <div className="w-full h-full relative overflow-y-auto flex flex-col">
-          <div className="absolute inset w-full h-fit grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 p-4">
-            {appReleases?.length > 0 ? (
-              <>
-                {appReleases.map((appRelease, index) => (
-                  <AppReleaseCard appReleaseServer={appRelease} key={appRelease.id || index} />
-                ))}
-                <AddCard />
-              </>
-            ) : (
-              <div className="w-full h-full flex flex-col justify-center items-center col-span-full">
-                <h1 className="text-2xl font-semibold">Uh oh-</h1>
-                <p>Unable to find or fetch releases</p>
-                <p className="text-sm text-gray-500 italic text-center">
-                  Check the logs for a potential reason. You might have hit the Github API limit.
-                  Try again later or add a repo in settings!
-                </p>
-                <Button
-                  onClick={fetchApps}
-                  className="mt-4 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-400 text-white font-semibold flex items-center gap-2 shadow transition-all duration-200"
-                >
-                  <IconRefresh
-                    strokeWidth={1.5}
-                    className={`${uiState.refreshingApps ? 'animate-spin-smooth' : ''}`}
-                  />
-                  <span className="md:block xs:hidden xs:text-center flex-grow">Retry</span>
-                </Button>
-              </div>
+      <MainElement>
+        <div className="page-scroll">
+          <div className="page-frame">
+            <PageHeader
+              eyebrow="Downloads"
+              title="App downloads"
+              description="Browse and install DeskThing apps."
+              actions={
+                <>
+                  <Button
+                    disabled={uiState.refreshingApps}
+                    onClick={handleRefreshData}
+                    className="action-button"
+                  >
+                    <IconRefresh className={uiState.refreshingApps ? 'animate-spin-smooth' : ''} />
+                    Refresh
+                  </Button>
+                  <Button
+                    onClick={handleToggleAddRepo}
+                    className="action-button action-button-primary"
+                  >
+                    <IconPlus />
+                    Add app
+                  </Button>
+                </>
+              }
+            />
+            {catalogError && (
+              <p role="alert" className="mb-4 text-sm text-amber-200">
+                {catalogError}
+              </p>
             )}
+            <div
+              aria-busy={uiState.refreshingApps}
+              className="w-full h-fit grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4"
+            >
+              {appReleases?.length > 0 ? (
+                <>
+                  {appReleases.map((appRelease, index) => (
+                    <AppReleaseCard appReleaseServer={appRelease} key={appRelease.id || index} />
+                  ))}
+                  <AddCard />
+                </>
+              ) : (
+                <div className="empty-state col-span-full">
+                  <div className="max-w-md">
+                    <div className="empty-state-icon">
+                      <IconLayoutgrid iconSize={36} />
+                    </div>
+                    <h2 className="text-xl font-semibold tracking-tight">
+                      {uiState.refreshingApps
+                        ? 'Loading app releases'
+                        : catalogError
+                          ? 'Catalog unavailable'
+                          : 'No app releases available'}
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      {uiState.refreshingApps
+                        ? 'Checking available apps…'
+                        : 'Add a trusted repository or import an app ZIP to get started. If you already added a repository, refresh to check for releases.'}
+                    </p>
+                    <Button
+                      onClick={handleRefreshData}
+                      disabled={uiState.refreshingApps}
+                      className="action-button action-button-primary mx-auto mt-5"
+                    >
+                      <IconRefresh
+                        strokeWidth={1.5}
+                        className={`${uiState.refreshingApps ? 'animate-spin-smooth' : ''}`}
+                      />
+                      <span>{uiState.refreshingApps ? 'Loading' : 'Refresh releases'}</span>
+                    </Button>
+                    <Button onClick={handleToggleAddRepo} className="action-button mx-auto mt-2">
+                      <IconPlus /> Add repository or ZIP
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {addAppError && (

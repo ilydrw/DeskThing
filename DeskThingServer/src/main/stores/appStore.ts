@@ -105,7 +105,8 @@ export class AppStore implements CacheableStore, AppStoreClass {
     })
 
     this.notificationStore.on('acknowledged', async (data) => {
-      if (this.apps[data.notification.source]) { // sends the notification back to the app
+      if (this.apps[data.notification.source]) {
+        // sends the notification back to the app
         this.sendDataToApp(data.notification.source, {
           type: DESKTHING_EVENTS.MESSAGE,
           request: '',
@@ -255,9 +256,8 @@ export class AppStore implements CacheableStore, AppStoreClass {
    * @implements CacheableStore
    */
   saveToFile = async (): Promise<void> => {
-    await this.saveAppsToFile()
-    const savePromises = Object.keys(this.apps).map((appName) => this.saveAppToFile(appName))
-    await Promise.all(savePromises)
+    await this.clearCache()
+    await setAppsData(this.getAll())
   }
 
   /**
@@ -287,8 +287,10 @@ export class AppStore implements CacheableStore, AppStoreClass {
     })
 
     // Wait another tick because it takes two for the UI to load - this is a low priority task
-    nextTick(async () => {
-      await loadAndRunEnabledApps()
+    nextTick(() => {
+      void loadAndRunEnabledApps().catch((error) => {
+        Logger.error('Unable to start enabled apps', { source: 'AppStore', function: 'loadApps', error: error as Error })
+      })
     })
   }
 
@@ -346,11 +348,6 @@ export class AppStore implements CacheableStore, AppStoreClass {
     // Create a wrapper for the listener
     const wrappedListener: AppProcessListener<T> = async (data) => {
       Logger.debug(`Received message from ${data.source}: ${data.type}:${data.request}`, {
-        source: 'AppStore',
-        function: 'onAppMessage'
-      })
-
-      Logger.debug(JSON.stringify(data.payload), {
         source: 'AppStore',
         function: 'onAppMessage'
       })

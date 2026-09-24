@@ -11,6 +11,31 @@ import {
   ClientPlatformIDs
 } from '@deskthing/types'
 import EventEmitter from 'node:events'
+import { getServiceConfig } from '@server/config/serviceConfig'
+import {
+  fetchProxyResource,
+  MAX_PROXY_RESPONSE_BYTES,
+  ProxyRequestError
+} from '@server/services/proxy/proxySecurity'
+import { isSafePathSegment, resolvePathWithinRoot } from '@server/utils/pathSecurity'
+import { randomUUID } from 'node:crypto'
+
+export const DEVICE_ID_COOKIE = 'deskthing-device-id'
+const DEVICE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const DEVICE_ID_MAX_AGE_MS = 10 * 365 * 24 * 60 * 60 * 1000
+
+export const getDeviceIdFromCookie = (cookieHeader?: string): string | undefined => {
+  if (!cookieHeader) return
+
+  for (const cookie of cookieHeader.split(';')) {
+    const [name, ...valueParts] = cookie.trim().split('=')
+    if (name !== DEVICE_ID_COOKIE) continue
+    const value = decodeURIComponent(valueParts.join('='))
+    return DEVICE_ID_PATTERN.test(value) ? value : undefined
+  }
+
+  return
+}
 
 type ExpressServerEvents = {
   'client-connected': [ClientManifest]
@@ -21,11 +46,18 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
   private server: Server | null = null
   private userDataPath: string
   private port: number
+  private address: string
 
-  constructor(expressApp: express.Application, userDataPath: string, port: number) {
+  constructor(
+    expressApp: express.Application,
+    userDataPath: string,
+    port: number,
+    address = '0.0.0.0'
+  ) {
     super()
     this.app = expressApp
     this.port = port
+    this.address = address
     this.userDataPath = userDataPath
   }
 
@@ -46,7 +78,7 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
       res.status(500).send('Server error')
     })
 
-    this.server = this.app.listen(this.port)
+    this.server = this.app.listen(this.port, this.address)
 
     this.setupClientRoutes()
 
@@ -89,7 +121,16 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
 
         manifest.context = getDeviceType(req.headers['user-agent'], clientIp, this.port)
 
-        manifest.connectionId = crypto.randomUUID()
+        const existingDeviceId = getDeviceIdFromCookie(req.headers.cookie)
+        const deviceId = existingDeviceId ?? randomUUID()
+        if (!existingDeviceId) {
+          res.cookie(DEVICE_ID_COOKIE, deviceId, {
+            httpOnly: true,
+            sameSite: 'lax',
+            maxAge: DEVICE_ID_MAX_AGE_MS
+          })
+        }
+        manifest.connectionId = deviceId
 
         this.emit('client-connected', manifest)
 
@@ -132,10 +173,21 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
   }
 
   private setupAppRoutes(): void {
+    const baseAppPath = join(this.userDataPath, 'apps')
+
     this.app.use('/app/:appName', (req: Request, res: Response, next: NextFunction) => {
       const appName = req.params.appName
-      const appPath = join(this.userDataPath, 'apps', appName, 'client')
-      const legacyAppPath = join(this.userDataPath, 'apps', appName)
+      if (!isSafePathSegment(appName)) {
+        res.status(400).send('Invalid app identifier')
+        return
+      }
+
+      const appPath = resolvePathWithinRoot(baseAppPath, appName, 'client')
+      const legacyAppPath = resolvePathWithinRoot(baseAppPath, appName)
+      if (!appPath || !legacyAppPath) {
+        res.status(400).send('Invalid app path')
+        return
+      }
 
       if (fs.existsSync(appPath)) {
         express.static(appPath, {
@@ -157,8 +209,17 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
 
     this.app.get('/app/:appName/*', async (req: Request, res: Response, next: NextFunction) => {
       const appName = req.params.appName
-      const appPath = join(this.userDataPath, 'apps', appName, 'client')
-      const legacyAppPath = join(this.userDataPath, 'apps', appName)
+      if (!isSafePathSegment(appName)) {
+        res.status(400).send('Invalid app identifier')
+        return
+      }
+
+      const appPath = resolvePathWithinRoot(baseAppPath, appName, 'client')
+      const legacyAppPath = resolvePathWithinRoot(baseAppPath, appName)
+      if (!appPath || !legacyAppPath) {
+        res.status(400).send('Invalid app path')
+        return
+      }
 
       if (fs.existsSync(appPath)) {
         console.log('Returning app path')
@@ -202,12 +263,16 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
     this.app.get('/resource/image/:appName/:imageName', async (req: Request, res: Response) => {
       const { appName, imageName } = req.params
 
-      if (!imageName) {
-        res.status(400).send('Image name is required')
+      if (!isSafePathSegment(appName) || !isSafePathSegment(imageName)) {
+        res.status(400).send('Invalid image path')
         return
       }
 
-      const imagePath = join(baseAppPath, appName, 'images', imageName)
+      const imagePath = resolvePathWithinRoot(baseAppPath, appName, 'images', imageName)
+      if (!imagePath) {
+        res.status(400).send('Invalid image path')
+        return
+      }
 
       if (fs.existsSync(imagePath)) {
         res.sendFile(imagePath)
@@ -218,6 +283,11 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
 
     this.app.get('/resource/thumbnail/:id', (req: Request, res: Response) => {
       const thumbnailId = req.params.id
+      if (!/^[a-f0-9]{64}$/i.test(thumbnailId)) {
+        res.status(400).send('Invalid thumbnail identifier')
+        return
+      }
+
       const thumbnailsDir = join(this.userDataPath, 'thumbnails')
       const thumbnailPath = join(thumbnailsDir, thumbnailId)
 
@@ -239,8 +309,18 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
     this.app.get('/resource/task/:appName/:id', (req: Request, res: Response) => {
       const stepId = req.params.id
       const appName = req.params.appName
-      const baseAppPath = join(this.userDataPath, 'apps', appName)
-      const tasksDir = join(baseAppPath, 'images', 'tasks')
+      if (!isSafePathSegment(appName) || !isSafePathSegment(stepId)) {
+        res.status(400).send('Invalid task image path')
+        return
+      }
+
+      const appPath = resolvePathWithinRoot(baseAppPath, appName)
+      if (!appPath) {
+        res.status(400).send('Invalid task image path')
+        return
+      }
+
+      const tasksDir = join(appPath, 'images', 'tasks')
       const stepImgPath = join(tasksDir, stepId)
 
       // Add .jpg extension if not present
@@ -263,9 +343,17 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
     this.app.get('/gen/:appName/*', (req, res) => {
       const appName = req.params.appName
       const filePath = req.params[0]
+      if (!isSafePathSegment(appName) || typeof filePath !== 'string') {
+        res.status(400).send('Invalid generated resource path')
+        return
+      }
 
       const appPath = join(baseAppPath, appName, 'server')
-      const fullPath = join(appPath, filePath)
+      const fullPath = resolvePathWithinRoot(appPath, filePath)
+      if (!fullPath) {
+        res.status(400).send('Invalid generated resource path')
+        return
+      }
 
       if (fs.existsSync(appPath)) {
         console.log('Returning file path', fullPath, req.url)
@@ -285,84 +373,96 @@ export class ExpressServer extends EventEmitter<ExpressServerEvents> {
     })
   }
 
+  private proxyResource = async (url: string, res: Response): Promise<void> => {
+    try {
+      const { proxyAllowPrivateNetwork } = getServiceConfig()
+      const response = await fetchProxyResource(url, {
+        allowPrivateNetwork: proxyAllowPrivateNetwork
+      })
+
+      if (!response.ok) {
+        res.status(response.status).send(`Upstream resource responded with ${response.status}`)
+        return
+      }
+
+      const declaredLength = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declaredLength) && declaredLength > MAX_PROXY_RESPONSE_BYTES) {
+        await response.body?.cancel()
+        res.status(413).send('Upstream resource exceeds the proxy size limit')
+        return
+      }
+
+      const forwardedHeaders = [
+        'cache-control',
+        'content-encoding',
+        'content-length',
+        'content-type',
+        'etag',
+        'last-modified'
+      ]
+      for (const header of forwardedHeaders) {
+        const value = response.headers.get(header)
+        if (value) res.setHeader(header, value)
+      }
+
+      if (!response.body) {
+        res.sendStatus(204)
+        return
+      }
+
+      const reader = response.body.getReader()
+      let transferredBytes = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        transferredBytes += value.byteLength
+        if (transferredBytes > MAX_PROXY_RESPONSE_BYTES) {
+          await reader.cancel()
+          res.destroy(new Error('Upstream resource exceeded the proxy size limit'))
+          return
+        }
+
+        res.write(value)
+      }
+
+      res.end()
+    } catch (error) {
+      const statusCode =
+        error instanceof ProxyRequestError
+          ? error.statusCode
+          : error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+            ? 504
+            : 502
+      const message =
+        error instanceof ProxyRequestError ? error.message : 'Unable to fetch proxied resource'
+
+      if (error instanceof ProxyRequestError) {
+        console.warn(`Proxy request rejected: ${error.message}`)
+      } else {
+        console.error('Error proxying resource:', error)
+      }
+      if (res.headersSent) {
+        res.destroy()
+      } else {
+        res.status(statusCode).send(message)
+      }
+    }
+  }
+
   private setupProxyRoutes(): void {
     this.app.get('/proxy/fetch/:url(*)', async (req: Request, res: Response) => {
-      try {
-        const url = decodeURIComponent(req.params.url)
-
-        const response = await fetch(url)
-        const contentType = response.headers.get('content-type')
-
-        if (contentType) {
-          res.setHeader('Content-Type', contentType)
-        }
-
-        if (response.body) {
-          const reader = response.body.getReader()
-
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            res.write(value)
-          }
-
-          res.end()
-        } else {
-          res.sendStatus(204)
-        }
-      } catch (error) {
-        console.log('Error fetching resource', error)
-        res.status(500).send('Error fetching resource')
-      }
+      await this.proxyResource(req.params.url, res)
     })
 
-    // General-purpose proxy that can handle any content type
     this.app.get('/proxy/v1', async (req: Request, res: Response) => {
-      try {
-        const url = req.query.url as string
-
-        if (!url) {
-          res.status(400).send('Missing url query parameter')
-          return
-        }
-
-        console.log('Proxying resource from:', url)
-
-        const response = await fetch(url)
-
-        if (!response.ok) {
-          res.status(response.status).send(`Upstream resource responded with ${response.status}`)
-          return
-        }
-
-        // Copy all headers from the original response
-        response.headers.forEach((value, key) => {
-          res.setHeader(key, value)
-        })
-
-        if (!response.body) {
-          res.sendStatus(204)
-          return
-        }
-
-        // Stream the response directly to the client
-        const reader = response.body.getReader()
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          res.write(value)
-        }
-
-        res.end()
-      } catch (error) {
-        console.error('Error proxying resource:', error)
-        res
-          .status(500)
-          .send(
-            `Error fetching resource: ${error instanceof Error ? error.message : String(error)}`
-          )
+      const url = req.query.url
+      if (typeof url !== 'string' || !url) {
+        res.status(400).send('Missing url query parameter')
+        return
       }
+
+      await this.proxyResource(url, res)
     })
   }
 

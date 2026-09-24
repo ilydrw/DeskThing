@@ -1,5 +1,6 @@
 import { PlatformStoreClass } from '@shared/stores/platformStore'
 import { TimeStoreClass } from '@shared/stores/timeStoreClass'
+import logger from '@server/utils/logger'
 
 export class TimeStore implements TimeStoreClass {
   private platformStore: PlatformStoreClass
@@ -29,8 +30,10 @@ export class TimeStore implements TimeStoreClass {
   }
 
   public async start(): Promise<void> {
-    this.initialize()
+    await this.initialize()
   }
+
+  public dispose(): void { this.stop() }
 
   private async sendTimeToClients(): Promise<void> {
     await this.platformStore.sendTimeToClient()
@@ -51,8 +54,13 @@ export class TimeStore implements TimeStoreClass {
     }
 
     this.timer = setTimeout(async () => {
-      await this.sendTimeToClients()
-      this.scheduleNextTick()
+      try {
+        await this.sendTimeToClients()
+      } catch (error) {
+        logger.warn('Unable to send time to clients', { source: 'TimeStore', error: error as Error })
+      } finally {
+        if (this._initialized) this.scheduleNextTick()
+      }
     }, nextInterval)
   }
 }

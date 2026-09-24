@@ -19,11 +19,8 @@ function runCommand(command: string): Promise<string> {
   return new Promise((resolve, reject) => {
     exec(command, (error, stdout, stderr) => {
       if (error) {
-        reject(`Error: ${error.message}`)
-        return
-      }
-      if (stderr) {
-        reject(`Stderr: ${stderr}`)
+        const details = stderr.trim()
+        reject(new Error(details ? `${error.message}\n${details}` : error.message))
         return
       }
       resolve(stdout)
@@ -44,10 +41,12 @@ async function checkFirewallRuleExists(port: number): Promise<boolean> {
   try {
     if (platform === 'win32') {
       // PowerShell command for Windows
-      checkCommand = `"Get-NetFirewallRule -DisplayName 'Deskthing Server Inbound'"`
-      const result = await runCommand(`powershell -Command ${checkCommand}`)
+      checkCommand = `"$inboundRule = Get-NetFirewallRule -DisplayName 'Deskthing Server Inbound' -ErrorAction SilentlyContinue; $outboundRule = Get-NetFirewallRule -DisplayName 'Deskthing Server Outbound' -ErrorAction SilentlyContinue; if ($null -ne $inboundRule -and $null -ne $outboundRule) { Write-Output 'true' }; exit 0"`
+      const result = await runCommand(
+        `powershell.exe -NoProfile -NonInteractive -Command ${checkCommand}`
+      )
 
-      return result.trim() !== ''
+      return result.trim() === 'true'
     } else if (platform === 'linux') {
       // Bash command for iptables on Linux
       checkCommand = `sudo iptables -C INPUT -p tcp --dport ${port} -j ACCEPT 2>/dev/null && echo "true" || echo "false"`
@@ -89,12 +88,16 @@ export async function setupFirewall(port: number): Promise<void> {
     progressBus.update(ProgressChannel.FIREWALL, 'Checking if rules exist', 10)
     const ruleExists = await checkFirewallRuleExists(port)
     if (ruleExists) {
-      Logger.debug(` Firewall rule for port ${port} verified successfully`, {
+      Logger.debug(`Firewall rules for port ${port} verified successfully`, {
         source: 'setupFirewall'
       })
-      progressBus.update(ProgressChannel.FIREWALL, 'Verified that the rule exists!', 20)
+      progressBus.complete(ProgressChannel.FIREWALL, 'Firewall rules already configured')
+      return
     } else {
-      Logger.log(LOGGING_LEVELS.ERROR, `FIREWALL: Failed to verify firewall rule for port ${port}!`)
+      Logger.debug(`Firewall rules for port ${port} not found; creating them`, {
+        source: 'setupFirewall'
+      })
+      progressBus.update(ProgressChannel.FIREWALL, 'Rules not found; creating them', 20)
     }
 
     if (platform === 'win32') {
@@ -108,19 +111,31 @@ export async function setupFirewall(port: number): Promise<void> {
       */
       progressBus.update(ProgressChannel.FIREWALL, 'Writing temp script', 30)
       const script = `
+        $ErrorActionPreference = 'Stop'
         $inboundRuleName = "${inboundRuleName}"
         $outboundRuleName = "${outboundRuleName}"
         $port = ${port}
 
         if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator"))
         {
-          $arguments = "& '" +$myinvocation.mycommand.definition + "'"
-          Start-Process powershell -Verb runAs -ArgumentList $arguments
-          Break
+          $arguments = @(
+            '-NoProfile'
+            '-NonInteractive'
+            '-ExecutionPolicy'
+            'Bypass'
+            '-File'
+            ('"{0}"' -f $myinvocation.mycommand.definition)
+          )
+          $process = Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments -Wait -PassThru
+          Exit $process.ExitCode
         }
 
-        New-NetFirewallRule -DisplayName $inboundRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port
-        New-NetFirewallRule -DisplayName $outboundRuleName -Direction Outbound -Action Allow -Protocol TCP -LocalPort $port
+        if ($null -eq (Get-NetFirewallRule -DisplayName $inboundRuleName -ErrorAction SilentlyContinue)) {
+          New-NetFirewallRule -DisplayName $inboundRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port
+        }
+        if ($null -eq (Get-NetFirewallRule -DisplayName $outboundRuleName -ErrorAction SilentlyContinue)) {
+          New-NetFirewallRule -DisplayName $outboundRuleName -Direction Outbound -Action Allow -Protocol TCP -LocalPort $port
+        }
 
       `
 
@@ -129,7 +144,9 @@ export async function setupFirewall(port: number): Promise<void> {
 
       try {
         progressBus.update(ProgressChannel.FIREWALL, 'Running setup for windows', 40)
-        await runCommand(`powershell -ExecutionPolicy Bypass -File "${tempScriptPath}"`)
+        await runCommand(
+          `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tempScriptPath}"`
+        )
         Logger.debug('Firewall rules set up successfully on Windows', {
           source: 'setupFirewall'
         })

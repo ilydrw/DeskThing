@@ -67,6 +67,8 @@ export const executeStagedFile = async ({
     if (!appId) {
       appId = appManifestData.id
     }
+    const appPath = getAppFilePath(appId)
+
     if (overwrite) {
       progressBus.update(ProgressChannel.FN_APP_INITIALIZE, 'Overwriting existing app...', 10)
       Logger.debug(`[executeStagedFile] Overwriting existing app (overwrite is enabled)...`)
@@ -74,8 +76,6 @@ export const executeStagedFile = async ({
       await new Promise((resolve) => setTimeout(resolve, 1000))
       await overwriteData(appId, { version: appManifestData.version })
     }
-
-    const appPath = getAppFilePath(appId)
 
     // Delete the app directory if it exists
     if (existsSync(appPath)) {

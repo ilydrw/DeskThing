@@ -24,20 +24,22 @@ vi.mock('electron', () => {
     send: vi.fn()
   }
 
-  const BrowserWindowMock = vi.fn().mockImplementation(() => ({
-    loadURL: vi.fn().mockResolvedValue(undefined),
-    loadFile: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn((event, callback) => {
-      if (event === 'ready-to-show') callback()
-      if (event === 'closed') callback()
-    }),
-    show: vi.fn(),
-    focus: vi.fn(),
-    isMinimized: vi.fn().mockReturnValue(false),
-    restore: vi.fn(),
-    isDestroyed: vi.fn().mockReturnValue(false),
-    webContents: mockWebContents
-  }))
+  const BrowserWindowMock = vi.fn().mockImplementation(function () {
+    return {
+      loadURL: vi.fn().mockResolvedValue(undefined),
+      loadFile: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn((event, callback) => {
+        if (event === 'ready-to-show') callback()
+        if (event === 'closed') callback()
+      }),
+      show: vi.fn(),
+      focus: vi.fn(),
+      isMinimized: vi.fn().mockReturnValue(false),
+      restore: vi.fn(),
+      isDestroyed: vi.fn().mockReturnValue(false),
+      webContents: mockWebContents
+    }
+  })
 
   Object.defineProperty(BrowserWindowMock, Symbol.hasInstance, {
     value: () => true
@@ -60,13 +62,15 @@ vi.mock('electron', () => {
     ipcMain: {
       handle: vi.fn()
     },
-    Tray: vi.fn().mockImplementation(() => ({
-      setToolTip: vi.fn(),
-      setContextMenu: vi.fn(),
-      on: vi.fn((event, callback) => {
-        if (event === 'click') callback()
-      })
-    })),
+    Tray: vi.fn().mockImplementation(function () {
+      return {
+        setToolTip: vi.fn(),
+        setContextMenu: vi.fn(),
+        on: vi.fn((event, callback) => {
+          if (event === 'click') callback()
+        })
+      }
+    }),
     Menu: {
       buildFromTemplate: vi.fn().mockReturnValue({})
     },

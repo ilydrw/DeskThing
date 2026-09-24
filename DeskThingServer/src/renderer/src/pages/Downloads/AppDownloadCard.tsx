@@ -62,7 +62,7 @@ export const AppReleaseCard: FC<AppReleaseCardProps> = ({ appReleaseServer }) =>
 
   return (
     <>
-      <div className="w-full relative p-4 border rounded-xl border-zinc-900 bg-zinc-950 transition-all duration-300 group hover:shadow-emerald-500/40 hover:border-emerald-400 hover:bg-gradient-to-br hover:from-zinc-950 hover:to-emerald-950 hover:scale-[1.01] hover:-translate-y-0.5">
+      <div className="download-card w-full relative p-4 border rounded-xl transition-colors duration-150 group">
         {isLoading ? (
           <div className="w-full h-full flex items-center justify-center">
             <IconLoading className="w-16 h-16 text-emerald-300 animate-spin-smooth" />
@@ -73,33 +73,33 @@ export const AppReleaseCard: FC<AppReleaseCardProps> = ({ appReleaseServer }) =>
               <Button
                 title="View history"
                 onClick={handleShowPastReleases}
-                className="w-full flex items-center justify-center gap-2 hover:bg-zinc-900"
+                className="action-button !p-2 flex items-center justify-center"
               >
                 <IconExpand />
               </Button>
             </div>
             <button onClick={handleShowPastReleases} className="w-full h-full">
-              <div className="flex justify-center mb-6">
+              <div className="flex justify-center mb-4">
                 {latestRelease?.icon ? (
                   <img
                     src={latestRelease.icon}
                     alt={latestRelease.appManifest?.label || 'App icon'}
-                    className="w-24 h-24 rounded-xl object-cover invert transition-all duration-300 group-hover:scale-105 group-hover:shadow-emerald-400/30"
+                    className="w-16 h-16 rounded-lg object-cover invert"
                   />
                 ) : (
-                  <div className="w-24 h-24 rounded-xl bg-zinc-900 flex items-center justify-center">
-                    <IconLogoGear className="w-16 h-16 text-zinc-300" />
+                  <div className="w-16 h-16 rounded-lg border border-zinc-800 bg-zinc-950/40 flex items-center justify-center">
+                    <IconLogoGear className="w-10 h-10 text-emerald-400" />
                   </div>
                 )}
               </div>
 
-              <div className="text-center mb-6">
-                <h3 className="text-2xl mb-2">
+              <div className="text-center mb-4">
+                <h3 className="text-base font-semibold mb-1 text-zinc-100">
                   {latestRelease?.appManifest?.label ||
                     latestRelease?.appManifest?.id ||
                     'Unknown App'}
                 </h3>
-                <div className="text-gray-400">
+                <div className="text-xs leading-5 text-zinc-500">
                   <div>Version {latestRelease?.appManifest?.version || 'N/A'}</div>
                   <div>{appReleaseServer?.totalDownloads?.toLocaleString() || 0} downloads</div>
                   {appReleaseServer.mainRelease.appManifest.author && (
@@ -108,17 +108,14 @@ export const AppReleaseCard: FC<AppReleaseCardProps> = ({ appReleaseServer }) =>
                 </div>
               </div>
             </button>
-            <div className="w-full space-y-4">
+            <div className="w-full">
               <Button
                 title="Download Latest"
                 onClick={() => handleDownload(latestRelease)}
-                className="w-full gap-2 group justify-center hover:bg-zinc-900 transition-all duration-300 group-hover:scale-105 group-hover:shadow-emerald-400 group-hover:bg-gradient-to-br group-hover:from-zinc-950/50 group-hover:to-emerald-950/50"
-                style={{ borderRadius: '0.75rem', borderWidth: 1, borderColor: 'transparent' }}
+                className="action-button action-button-primary w-full gap-2 justify-center"
               >
-                <p className="group-hover:text-emerald-400 transition-all duration-300">
-                  Download Latest
-                </p>
-                <IconDownload className="transition-all duration-300 group-hover:text-emerald-400 group-hover:scale-110 group-hover:rotate-12" />
+                <p>Download latest</p>
+                <IconDownload />
               </Button>
             </div>
           </div>

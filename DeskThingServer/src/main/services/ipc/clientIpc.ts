@@ -58,7 +58,7 @@ export const clientHandler: {
 
     try {
       const clientManifest = await clientStore.loadClientFromZip(data.payload)
-      
+
       if (!clientManifest) {
         throw new Error('Client Manifest was not found after install!')
       }
@@ -74,7 +74,6 @@ export const clientHandler: {
         clientManifest: clientManifest,
         message: 'Successfully loaded client manifest'
       }
-
     } catch (error) {
       progressBus.error(
         ProgressChannel.IPC_CLIENT,
@@ -87,7 +86,6 @@ export const clientHandler: {
         message: error instanceof Error ? error.message : handleError(error)
       }
     }
-
   },
 
   url: async (data) => {
@@ -196,11 +194,7 @@ export const clientHandler: {
           const response = await clientStore.refreshClient()
 
           if (!response) {
-            progressBus.error(
-              ProgressChannel.IPC_CLIENT,
-              'client-manifest',
-              'Failed to get staged client!'
-            )
+            progressBus.warn(ProgressChannel.IPC_CLIENT, 'No staged client is installed')
             return null
           }
 
@@ -371,6 +365,18 @@ export const clientHandler: {
         handleError(error)
       )
       return
+    }
+  },
+
+  [IPC_CLIENT_TYPES.KNOWN_DEVICES]: async (data) => {
+    const deviceRegistryStore = await storeProvider.getStore('deviceRegistryStore')
+    switch (data.request) {
+      case 'get':
+        return deviceRegistryStore.getDevices()
+      case 'rename':
+        return deviceRegistryStore.renameDevice(data.payload.deviceId, data.payload.displayName)
+      case 'forget':
+        return deviceRegistryStore.forgetDevice(data.payload.deviceId)
     }
   }
 }

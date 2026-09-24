@@ -248,7 +248,8 @@ const LogItem: React.FC<{
         // Not valid JSON, leave as is
       }
     }
-    const logsText = `\`\`\`\n${log.options.context} ${log.options.store}${log.options.method && `(${log.options.method})`} ${logContent}${log.options.error ? ` - ${log.options.error.message} - ${log.options.error.stack} - ${String(log.options.error.cause)}` : ''}\n\`\`\``
+    const logLocation = `${log.options.context}${log.options.store ? `.${log.options.store}` : ''}${log.options.method ? `(${log.options.method})` : ''}`
+    const logsText = `\`\`\`\n${logLocation} ${logContent}${log.options.error ? ` - ${log.options.error.message} - ${log.options.error.stack} - ${String(log.options.error.cause)}` : ''}\n\`\`\``
     navigator.clipboard.writeText(logsText)
     setCopied(true)
     setTimeout(() => setCopied(false), 1000)
@@ -261,29 +262,29 @@ const LogItem: React.FC<{
       onClick={handleCopyLogs}
     >
       <div className="flex flex-col gap-1 w-3/4">
-      <span className="font-bold text-xs text-gray-400">
-        {log.options.context}
-        {log.options.store && `.${log.options.store}`}
-        {log.options.method && `(${log.options.method})`}
-      </span>
-      <span className={`break-words ${colorMap[log.type]}`}>{log.log}</span>
-      {log.options.error?.message && (
-        <span className="text-xs font-geistMono italic text-red-400">
-        ERROR: {log.options.error?.message}
+        <span className="font-bold text-xs text-gray-400">
+          {log.options.context}
+          {log.options.store && `.${log.options.store}`}
+          {log.options.method && `(${log.options.method})`}
         </span>
-      )}
+        <span className={`break-words ${colorMap[log.type]}`}>{log.log}</span>
+        {log.options.error?.message && (
+          <span className="text-xs font-geistMono italic text-red-400">
+            ERROR: {log.options.error?.message}
+          </span>
+        )}
       </div>
       <div className="flex flex-col items-end w-1/4">
-      <span className="text-xs italic text-gray-500 group-hover:text-gray-300">
-        [{new Date(log.options.date as string).toLocaleTimeString()}]
-      </span>
-      <span className="text-xs text-gray-400">{log.options.source}</span>
+        <span className="text-xs italic text-gray-500 group-hover:text-gray-300">
+          [{new Date(log.options.date as string).toLocaleTimeString()}]
+        </span>
+        <span className="text-xs text-gray-400">{log.options.source}</span>
       </div>
       <div
-      className={`flex items-center absolute h-full justify-center w-full gap-2 py-2 ${copied ? 'bg-black/75 opacity-100' : 'opacity-0 pointer-events-none'} transition-all duration-300`}
+        className={`flex items-center absolute h-full justify-center w-full gap-2 py-2 ${copied ? 'bg-black/75 opacity-100' : 'opacity-0 pointer-events-none'} transition-all duration-300`}
       >
-      <IconCopy className="text-green-400" strokeWidth={1.5} />
-      <span className="text-green-400 font-semibold">Log Copied to Clipboard</span>
+        <IconCopy className="text-green-400" strokeWidth={1.5} />
+        <span className="text-green-400 font-semibold">Log Copied to Clipboard</span>
       </div>
     </li>
   )

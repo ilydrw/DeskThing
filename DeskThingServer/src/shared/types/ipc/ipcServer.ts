@@ -20,7 +20,8 @@ import {
   AppLatestServer,
   ClientLatestServer,
   ThingifyArchiveDownloadEvent,
-  FlashingState
+  FlashingState,
+  KnownDevice
 } from '..'
 
 export type IpcRendererCallback<T extends ServerIPCData['type']> = (
@@ -88,6 +89,10 @@ export type ServerIPCData = {
   | {
       type: 'clients'
       payload: Client[]
+    }
+  | {
+      type: 'known-devices'
+      payload: KnownDevice[]
     }
   | {
       type: 'platform:client'

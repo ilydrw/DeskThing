@@ -1,276 +1,196 @@
-/**
- * Imports the `app` module from the `electron` package.
- * This module provides access to the Electron application's functionality.
- */
 import { app } from 'electron'
-import { join } from 'path'
+import { dirname, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import Logger from '@server/utils/logger'
-import { handleError } from '@server/utils/errorHandler'
+import { resolvePathWithinRoot } from '@server/utils/pathSecurity'
 
-class FileServiceError extends Error {
-  constructor(
-    message: string,
-    public cause?: unknown
-  ) {
-    super(message)
+export class FileServiceError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause })
     this.name = 'FileServiceError'
-    // Capture original stack if possible
-    if (cause instanceof Error) {
-      this.stack = `${this.stack}\nCaused by: ${cause.stack}`
-    }
   }
 }
 
-class FileOperationQueue {
-  private queues: Map<string, Array<() => Promise<void>>> = new Map()
-  private processingQueues: Set<string> = new Set()
-  private retryDelay = 100
-  private maxRetries = 3
-
-  private async processQueue(queueId: string): Promise<void> {
-    if (this.processingQueues.has(queueId) || !this.queues.get(queueId)?.length) return
-
-    this.processingQueues.add(queueId)
-    const queue = this.queues.get(queueId)!
-    const operation = queue.shift()
-
-    if (operation) {
-      let retries = 0
-      while (retries < this.maxRetries) {
-        try {
-          await operation()
-          break
-        } catch (error) {
-          retries++
-          if (retries === this.maxRetries) {
-            Logger.error(`Failed to process operation after ${this.maxRetries} retries`, {
-              error: error as Error,
-              function: 'processQueue',
-              source: 'FileService'
-            })
-            break
-          }
-          await new Promise((resolve) => setTimeout(resolve, this.retryDelay))
-        }
-      }
-    }
-
-    this.processingQueues.delete(queueId)
-    if (queue.length === 0) {
-      this.queues.delete(queueId)
-    } else {
-      this.processQueue(queueId)
-    }
+const getUserDataFilePath = (relativePath: string): string => {
+  const userDataPath = resolve(app.getPath('userData'))
+  const filePath = resolvePathWithinRoot(userDataPath, relativePath)
+  if (!filePath || filePath === userDataPath) {
+    throw new FileServiceError('File path must remain within the user data directory')
   }
-
-  public enqueue<T>(queueId: string, operation: () => Promise<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      if (!this.queues.has(queueId)) {
-        this.queues.set(queueId, [])
-      }
-
-      this.queues.get(queueId)!.push(async () => {
-        try {
-          const result = await operation()
-          resolve(result)
-        } catch (err) {
-          reject(err)
-        }
-      })
-      this.processQueue(queueId)
-    })
-  }
+  return filePath
 }
-const fileQueue = new FileOperationQueue()
 
-/**
- * Reads data from a file in the user's application data directory.
- *
- * @param filename - The name of the file to read.
- * @returns The parsed data from the file, or `false` if the file does not exist or an error occurs.
- */
-export const readFromFile = async <T>(filename: string): Promise<T | undefined> => {
-  return fileQueue.enqueue(filename, async () => {
-    const dataFilePath = join(app.getPath('userData'), filename)
+// Use the resolved path so aliases (including Windows casing) share one queue.
+const pathKey = (path: string): string => (process.platform === 'win32' ? path.toLowerCase() : path)
+const pending = new Map<string, Promise<void>>()
+const unreadable = new Set<string>()
+
+const enqueue = <T>(path: string, operation: () => Promise<T>): Promise<T> => {
+  const key = pathKey(path)
+  const result = (pending.get(key) ?? Promise.resolve()).then(operation)
+  const settled = result.then(
+    () => undefined,
+    () => undefined
+  )
+  pending.set(key, settled)
+  void settled.then(() => {
+    if (pending.get(key) === settled) pending.delete(key)
+  })
+  return result
+}
+
+const hasCode = (error: unknown, code: string): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === code
+
+export type FileValidator = (value: unknown) => void
+
+const readJson = async <T>(path: string, validate?: FileValidator): Promise<T | undefined> => {
+  let raw: string
+  try {
+    raw = await fs.promises.readFile(path, 'utf8')
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) {
+      unreadable.delete(pathKey(path))
+      return undefined
+    }
+    unreadable.add(pathKey(path))
+    throw new FileServiceError('[readFromFile] Cannot read ' + path, error)
+  }
+
+  let value: unknown
+  try {
+    // Accept UTF-8 BOMs written by Windows editors and older tools.
+    value = JSON.parse(raw.replace(/^\uFEFF/, ''))
+    if (value === null) throw new Error('Expected persisted data, received null')
+    validate?.(value)
+  } catch {
+    const backupPath = path + '.corrupt-' + Date.now() + '-' + randomUUID() + '.bak'
     try {
-      const rawData = await fs.promises.readFile(dataFilePath)
-      return JSON.parse(rawData.toString())
+      // Keep the original bytes before a caller creates defaults. Never log their contents.
+      await fs.promises.rename(path, backupPath)
     } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-        Logger.debug(`File not found: ${filename}`, {
-          source: 'readFromFile'
-        })
-        // Return undefined or create default data
-        return undefined
-      }
-
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      throw new FileServiceError(
-        `[readFromFile] Failed to read data ${filename} with: ${errorMessage}`,
-        error
-      )
+      unreadable.add(pathKey(path))
+      throw new FileServiceError('[readFromFile] Cannot preserve invalid data in ' + path, error)
     }
-  })
-}
-
-/**
- * Writes data to a file in the user's application data directory.
- * If the directory path does not exist, it will be created recursively.
- *
- * @param data - The data to be written to the file.
- * @param filepath - The path of the file relative to the user's application data directory.
- * @throws - error when it fails
- */
-export const writeToFile = async <T>(data: T, filepath: string): Promise<void> => {
-  return fileQueue.enqueue(filepath, async () => {
-    const finalPath = join(app.getPath('userData'), filepath)
-    const dirPath = join(app.getPath('userData'), ...filepath.split(/[/\\]/).slice(0, -1))
-
-    try {
-      // Check if file exists
-      const fileExists = await fs.promises
-        .access(finalPath)
-        .then(() => true)
-        .catch(() => false)
-
-      await fs.promises.mkdir(dirPath, { recursive: true })
-
-      if (!fileExists) {
-        // If file doesn't exist, write directly
-        await fs.promises.writeFile(finalPath, JSON.stringify(data, null, 2))
-        return
-      }
-
-      // If file exists, use temp file for safe writing
-      const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const tempFilename = `deskthing-${filepath.replace(/[/\\]/g, '-')}-${uniqueId}.tmp`
-      const tempPath = join(app.getPath('temp'), tempFilename)
-
-      try {
-        await fs.promises.writeFile(tempPath, JSON.stringify(data, null, 2))
-        await fs.promises.copyFile(tempPath, finalPath)
-      } catch (err) {
-        Logger.error('Error writing data', {
-          error: err as Error,
-          source: 'writeToFile'
-        })
-        throw new Error('[writeToFile]: failed with ', { cause: err })
-      } finally {
-        try {
-          await fs.promises.rm(tempPath, { force: true })
-        } catch (err) {
-          Logger.error('Error deleting temp files', {
-            error: err as Error,
-            source: 'writeToFile'
-          })
-        }
-      }
-    } catch (err) {
-      Logger.error('Error writing data', {
-        error: err as Error,
-        source: 'writeToFile'
-      })
-      throw new Error('[writeToFile]: failed with ', { cause: err })
-    }
-  })
-}
-export const addToFile = async (data: string | Buffer, filepath: string): Promise<void> => {
-  return fileQueue.enqueue(filepath, async () => {
-    const fullPath = join(app.getPath('userData'), filepath)
-    const dirPath = join(app.getPath('userData'), ...filepath.split(/[/\\]/).slice(0, -1))
-
-    try {
-      await fs.promises.mkdir(dirPath, { recursive: true })
-
-      const content = typeof data === 'string' ? data : data.toString()
-      await fs.promises.appendFile(fullPath, content + '\n')
-    } catch (err) {
-      throw new Error('[addToFile]: failed with ' + { source: err })
-    }
-  })
-}
-
-/**
- * Writes data to a file at the specified filepath.
- *
- * @param data - The data to be written to the file.
- * @param filepath - The full path of the file to write the data to.
- * @deprecated - use {@link writeToFile} instead
- * @throws - Error or Unknown
- */
-export const writeToGlobalFile = async <T>(data: T, filepath: string): Promise<void> => {
-  writeToFile(data, filepath)
-}
-
-/**
- * Reads data from a file at the specified global filepath.
- *
- * @param filename - The name of the file to read from the user's application data directory.
- * @deprecated - use {@link readFromFile} instead
- * @returns The parsed data from the file, or `false` if the file does not exist or an error occurs.
- */
-export const readFromGlobalFile = async <T>(filename: string): Promise<T | false> => {
-  return fileQueue.enqueue(filename, async () => {
-    const dataFilePath = join(app.getPath('userData'), filename)
-    try {
-      if (!fs.existsSync(dataFilePath)) {
-        // File does not exist, create it with default data
-        return false
-      }
-      const rawData = await fs.promises.readFile(dataFilePath)
-      return JSON.parse(rawData.toString())
-    } catch (err) {
-      console.error('Error reading data:', err)
-      return false
-    }
-  })
-}
-/**
- * Deletes a file from the user's application data directory.
- *
- * @param filename - The name of the file to delete.
- * @returns `true` if the deletion was successful, `false` if the file doesn't exist or an error occurs.
- /**
- * Deletes a file from the user's application data directory.
- *
- * @param filename - The name of the file to delete.
- * @returns `true` if the deletion was successful, `false` if the file doesn't exist or an error occurs.
- */
-export const deleteFile = async (filename: string): Promise<void> => {
-  if (!filename || typeof filename !== 'string') {
-    throw new Error('[deleteFile] Invalid filename provided')
+    unreadable.delete(pathKey(path))
+    Logger.warn('Invalid persisted data in ' + path + '; original preserved at ' + backupPath, {
+      source: 'FileService',
+      function: 'readFromFile'
+    })
+    return undefined
   }
+  unreadable.delete(pathKey(path))
+  // Callers with a known schema provide its runtime validator at this boundary.
+  return value as T
+}
 
-  return fileQueue.enqueue(filename, async () => {
-    const filePath = join(app.getPath('userData'), filename)
+const serialize = (data: unknown, path: string): string => {
+  try {
+    const json = JSON.stringify(data, null, 2)
+    if (json === undefined) throw new Error('Value is not JSON serializable')
+    return json
+  } catch (error) {
+    throw new FileServiceError('[writeToFile] Cannot serialize data for ' + path, error)
+  }
+}
 
+const writeJson = async (path: string, json: string): Promise<void> => {
+  if (unreadable.has(pathKey(path))) {
+    throw new FileServiceError(
+      '[writeToFile] Refusing to overwrite unreadable data in ' + path + '; restore access and read it again first'
+    )
+  }
+  const tempPath = path + '.' + randomUUID() + '.tmp'
+  try {
+    await fs.promises.mkdir(dirname(path), { recursive: true })
+    // Same-directory rename is atomic for both first creation and replacement.
+    const file = await fs.promises.open(tempPath, 'wx', 0o600)
     try {
-      const fileStats = await fs.promises.stat(filePath)
-      if (!fileStats.isFile()) {
-        // If it's a directory, we'll remove it recursively
-        await fs.promises.rm(filePath, { recursive: true, force: true })
-        return
-      }
+      await file.writeFile(json, 'utf8')
+      await file.sync()
+    } finally {
+      await file.close()
+    }
+    await fs.promises.rename(tempPath, path)
+  } catch (error) {
+    throw new FileServiceError('[writeToFile] Cannot replace ' + path, error)
+  } finally {
+    try {
+      await fs.promises.rm(tempPath, { force: true })
+    } catch (error) {
+      Logger.warn('Unable to remove temporary file ' + tempPath, {
+        source: 'FileService',
+        function: 'writeToFile',
+        error: error instanceof Error ? error : new Error(String(error))
+      })
+    }
+  }
+}
 
-      await fs.promises.rm(filePath, { recursive: true })
-    } catch (error: unknown) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
-        throw new Error('[deleteFile] File does not exist: ' + filePath)
-      }
+/** Missing or preserved-invalid state returns undefined; filesystem failures remain errors. */
+export const readFromFile = async <T>(
+  filename: string,
+  validate?: FileValidator
+): Promise<T | undefined> => {
+  const path = getUserDataFilePath(filename)
+  return enqueue(path, () => readJson<T>(path, validate))
+}
 
-      if (error instanceof Error) {
-        throw new Error('[deleteFile] Error deleting file: ' + error.message)
-      } else {
-        throw new Error('[deleteFile] Unknown error deleting file: ' + handleError(error), {
-          cause: error
-        })
-      }
+export const writeToFile = async <T>(data: T, filepath: string): Promise<void> => {
+  const path = getUserDataFilePath(filepath)
+  // Snapshot now, rather than serializing a mutable store later when its queue runs.
+  const json = serialize(data, path)
+  return enqueue(path, () => writeJson(path, json))
+}
+
+/** Serialize the entire read/modify/write transaction to prevent lost updates. */
+export const updateFile = async <T>(
+  filename: string,
+  update: (current: T | undefined) => T,
+  validate?: FileValidator
+): Promise<T> => {
+  const path = getUserDataFilePath(filename)
+  return enqueue(path, async () => {
+    const next = update(await readJson<T>(path, validate))
+    validate?.(next)
+    await writeJson(path, serialize(next, path))
+    return next
+  })
+}
+
+export const addToFile = async (data: string | Buffer, filepath: string): Promise<void> => {
+  const path = getUserDataFilePath(filepath)
+  return enqueue(path, async () => {
+    try {
+      await fs.promises.mkdir(dirname(path), { recursive: true })
+      await fs.promises.appendFile(path, data.toString() + '\n')
+    } catch (error) {
+      throw new FileServiceError('[addToFile] Cannot append to ' + path, error)
     }
   })
+}
+
+/** @deprecated Use writeToFile. Paths are confined to userData. */
+export const writeToGlobalFile = writeToFile
+
+/** @deprecated Use readFromFile. */
+export const readFromGlobalFile = async <T>(filename: string): Promise<T | false> =>
+  (await readFromFile<T>(filename)) ?? false
+
+export const deleteFile = async (filename: string): Promise<void> => {
+  const path = getUserDataFilePath(filename)
+  return enqueue(path, async () => {
+    try {
+      await fs.promises.rm(path, { recursive: true })
+      unreadable.delete(pathKey(path))
+    } catch (error) {
+      throw new FileServiceError('[deleteFile] Cannot delete ' + path, error)
+    }
+  })
+}
+
+/** Await writes already queued by stores before the process exits. */
+export const flushFileOperations = async (): Promise<void> => {
+  while (pending.size > 0) await Promise.all(pending.values())
 }

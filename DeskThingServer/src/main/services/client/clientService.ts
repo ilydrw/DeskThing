@@ -1,12 +1,87 @@
 import logger from '@server/utils/logger'
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { randomUUID } from 'node:crypto'
+import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { progressBus } from '../events/progressBus'
 import { ProgressChannel } from '@shared/types'
 import { ClientManifest } from '@deskthing/types'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { handleError } from '@server/utils/errorHandler'
+
+const isClientManifest = (value: unknown): value is ClientManifest => {
+  if (!value || typeof value !== 'object') return false
+
+  const manifest = value as Partial<ClientManifest>
+  return (
+    typeof manifest.id === 'string' &&
+    manifest.id.length > 0 &&
+    typeof manifest.name === 'string' &&
+    manifest.name.length > 0 &&
+    typeof manifest.version === 'string' &&
+    manifest.version.length > 0
+  )
+}
+
+const parseClientManifest = (content: string): ClientManifest | null => {
+  const parsed = JSON.parse(content) as unknown
+  return isClientManifest(parsed) ? parsed : null
+}
+
+const parseClientManifestScript = (content: string): ClientManifest | null => {
+  const match = content.match(/window\.manifest\s*=\s*({[\s\S]*?})\s*;\s*document\.dispatchEvent/)
+  return match ? parseClientManifest(match[1]) : null
+}
+
+const writeManifestAtomically = async (
+  manifestPath: string,
+  manifest: ClientManifest
+): Promise<void> => {
+  const tempPath = join(dirname(manifestPath), `.manifest-${process.pid}-${randomUUID()}.tmp`)
+
+  try {
+    await writeFile(tempPath, JSON.stringify(manifest), 'utf8')
+    await rename(tempPath, manifestPath)
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => undefined)
+  }
+}
+
+const recoverClientManifest = async (
+  webappPath: string,
+  manifestPath: string
+): Promise<ClientManifest | null> => {
+  const recoverySources = [
+    {
+      name: 'manifest.js',
+      parse: parseClientManifestScript
+    },
+    {
+      name: 'manifest.default.json',
+      parse: parseClientManifest
+    }
+  ]
+
+  for (const source of recoverySources) {
+    try {
+      const recovered = source.parse(await readFile(join(webappPath, source.name), 'utf8'))
+      if (!recovered) continue
+
+      await writeManifestAtomically(manifestPath, recovered)
+      logger.warn(`Recovered the installed client manifest from ${source.name}`, {
+        store: 'clientService',
+        method: 'getClientManifest'
+      })
+      return recovered
+    } catch {
+      // Try the next packaged recovery source.
+    }
+  }
+
+  return null
+}
+
+let manifestUpdateQueue: Promise<void> = Promise.resolve()
 
 /**
  * Downloads and installs a client from a given URL.
@@ -108,18 +183,32 @@ export async function downloadAndInstallClient(url: string): Promise<void> {
  */
 export const getClientManifest = async (): Promise<ClientManifest | null> => {
   const userDataPath = app.getPath('userData')
-  const manifestPath = join(userDataPath, 'webapp', 'manifest.json')
+  const webappPath = join(userDataPath, 'webapp')
+  const manifestPath = join(webappPath, 'manifest.json')
 
   try {
     const data = await readFile(manifestPath, 'utf8')
-    // TODO: Client validation
-    return JSON.parse(data) as ClientManifest
+    const manifest = parseClientManifest(data)
+    if (!manifest) {
+      throw new Error('Installed client manifest is missing required fields')
+    }
+    return manifest
   } catch (error) {
-    logger.error('(nonfatal) Error getting client manifest:', {
-      error: error as Error,
-      store: 'releaseUtils',
-      method: 'getClientManifest'
-    })
+    const recoveredManifest = await recoverClientManifest(webappPath, manifestPath)
+    if (recoveredManifest) return recoveredManifest
+
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      logger.debug('No device client is installed', {
+        store: 'clientService',
+        method: 'getClientManifest'
+      })
+    } else {
+      logger.warn('Unable to read the installed client manifest', {
+        error: error as Error,
+        store: 'clientService',
+        method: 'getClientManifest'
+      })
+    }
     return null
   }
 }
@@ -127,14 +216,25 @@ export const updateManifest = async (manifest: Partial<ClientManifest>): Promise
   const userDataPath = app.getPath('userData')
   const manifestPath = join(userDataPath, 'webapp', 'manifest.json')
 
-  try {
+  const update = manifestUpdateQueue.then(async () => {
     const parsedManifest = await getClientManifest()
+    if (!parsedManifest) {
+      throw new Error('Cannot update the client manifest because no valid client is installed')
+    }
+
     const updatedManifest = { ...parsedManifest, ...manifest }
-    await writeFile(manifestPath, JSON.stringify(updatedManifest), 'utf8')
+    await writeManifestAtomically(manifestPath, updatedManifest)
+  })
+
+  manifestUpdateQueue = update.catch(() => undefined)
+
+  try {
+    await update
   } catch (error) {
     logger.error('Error updating client manifest:', {
       error: error as Error
     })
+    throw error
   }
 }
 

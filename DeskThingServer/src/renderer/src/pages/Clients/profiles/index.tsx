@@ -3,7 +3,6 @@ import Sidebar from '@renderer/nav/Sidebar'
 import Button from '@renderer/components/Button'
 import { IconCheckCircle, IconDownload, IconPlus, IconUpload } from '@renderer/assets/icons'
 import MainElement from '@renderer/nav/MainElement'
-import SponsorButton from '@renderer/components/SponsorButton'
 import useMappingStore from '@renderer/stores/mappingStore'
 
 const ProfilesPage: React.FC = () => {
@@ -85,9 +84,7 @@ const ProfilesPage: React.FC = () => {
             </div>
             <div className="w-full flex-col flex items-center justify-center h-full col-span-2 row-span-2">
               <p>Profiles will be added in a later version</p>
-              <p>While you are here, consider helping support deskthing!</p>
-              <SponsorButton />
-              <p>A little coffee can go a long way</p>
+              <p className="text-zinc-500">This area is reserved for community profile sharing.</p>
             </div>
             <div className="border-gray-500 border-t w-full h-full col-span-1"></div>
             <div className="border-gray-500 border-t w-full h-full col-span-2"></div>

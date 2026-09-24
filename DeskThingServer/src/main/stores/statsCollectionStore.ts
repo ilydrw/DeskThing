@@ -14,6 +14,9 @@ import { StatsStoreClass } from '@shared/stores/statsStore'
 import { StoreInterface } from '@shared/interfaces/storeInterface'
 import { CacheableStore } from '@shared/types'
 import { app } from 'electron/main'
+import { SettingsStoreClass } from '@shared/stores/settingsStore'
+import { ClientManifest } from '@deskthing/types'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 /**
  * StatsCollector class responsible for listening to store events and collecting statistics
@@ -21,7 +24,9 @@ import { app } from 'electron/main'
 export class StatsCollector implements StoreInterface, CacheableStore {
   private statsStore: StatsStoreClass | null = null
   private _initialized = false
+  private collecting = false
   private cleanupFunctions: (() => void)[] = []
+  private settingsCleanup: (() => void) | null = null
   private sessionStartTime = Date.now()
   private resourceMonitorInterval: NodeJS.Timeout | null = null
   private readonly RESOURCE_MONITOR_INTERVAL = 60000 * 30 // 30 minutes
@@ -31,7 +36,10 @@ export class StatsCollector implements StoreInterface, CacheableStore {
     return this._initialized
   }
 
-  constructor(statsStore: StatsStoreClass) {
+  constructor(
+    statsStore: StatsStoreClass,
+    private settingsStore: SettingsStoreClass
+  ) {
     this.statsStore = statsStore
   }
 
@@ -49,7 +57,6 @@ export class StatsCollector implements StoreInterface, CacheableStore {
   async initialize(): Promise<void> {
     if (this._initialized) return
 
-    this._initialized = true
     try {
       if (!this.statsStore) {
         Logger.warn('Stats store not available', {
@@ -59,12 +66,18 @@ export class StatsCollector implements StoreInterface, CacheableStore {
         return
       }
 
-      this.statsStore.initialize()
+      await this.statsStore.initialize()
+      this.settingsCleanup = this.settingsStore.on('flag_collectStats', async (enabled) => {
+        if (enabled) {
+          await this.startCollection()
+        } else {
+          this.stopCollection()
+        }
+      })
 
-      await this.setupStoreListeners()
-      this.startResourceMonitoring()
-      this.collectSystemStats()
-      this.collectSessionOpenStats()
+      if ((await this.settingsStore.getSetting('flag_collectStats')) === true) {
+        await this.startCollection()
+      }
 
       Logger.info('Stats collector initialized', {
         function: 'initialize',
@@ -77,6 +90,33 @@ export class StatsCollector implements StoreInterface, CacheableStore {
         source: 'statsCollector'
       })
     }
+
+    this._initialized = true
+  }
+
+  private async startCollection(): Promise<void> {
+    if (this.collecting) return
+    if (!getServiceConfig().statsUrl) return
+
+    this.collecting = true
+    this.sessionStartTime = Date.now()
+    await this.setupStoreListeners()
+    this.startResourceMonitoring()
+    this.collectSystemStats()
+    this.collectSessionOpenStats()
+  }
+
+  private stopCollection(): void {
+    this.cleanupFunctions.forEach((cleanup) => cleanup())
+    this.cleanupFunctions = []
+
+    if (this.resourceMonitorInterval) {
+      clearInterval(this.resourceMonitorInterval)
+      this.resourceMonitorInterval = null
+    }
+
+    this.lastResourceUsage = null
+    this.collecting = false
   }
 
   /**
@@ -123,19 +163,23 @@ export class StatsCollector implements StoreInterface, CacheableStore {
       // Platform Store listeners
       const platformStore = await storeProvider.getStore('platformStore', false)
 
-      platformStore.on(PlatformStoreEvent.CLIENT_LIST, (clients) => {
+      const platformListener = (clients: ReturnType<typeof platformStore.getClients>): void => {
         this.collectStat({
           stat: 'kv',
           type: 'number',
           key: 'clients_connected',
           value: clients.length
         })
-      })
+      }
+      platformStore.on(PlatformStoreEvent.CLIENT_LIST, platformListener)
+      this.cleanupFunctions.push(() =>
+        platformStore.off(PlatformStoreEvent.CLIENT_LIST, platformListener)
+      )
 
       // Client Store listeners
       const clientStore = await storeProvider.getStore('clientStore', false)
 
-      clientStore.on('client-updated', (client) => {
+      const clientListener = (client: ClientManifest): void => {
         this.collectStat({
           stat: 'system',
           type: 'client',
@@ -144,18 +188,22 @@ export class StatsCollector implements StoreInterface, CacheableStore {
             version: client.version || 'unknown'
           }
         })
-      })
+      }
+      clientStore.on('client-updated', clientListener)
+      this.cleanupFunctions.push(() => clientStore.off('client-updated', clientListener))
 
       const flashStore = await storeProvider.getStore('flashStore', false)
 
-      flashStore.on('flash-completed', (status) => {
+      const flashListener = (status: boolean): void => {
         this.collectStat({
           stat: 'kv',
           type: 'boolean',
           key: 'flash_completed',
           value: status
         })
-      })
+      }
+      flashStore.on('flash-completed', flashListener)
+      this.cleanupFunctions.push(() => flashStore.off('flash-completed', flashListener))
 
       // // Mapping Store listeners
       // const mappingStore = await storeProvider.getStore('mappingStore', false)
@@ -304,6 +352,8 @@ export class StatsCollector implements StoreInterface, CacheableStore {
    * Collect session close statistics and cleanup
    */
   async collectSessionCloseStats(): Promise<void> {
+    if (!this.collecting) return
+
     const uptime = Math.floor((Date.now() - this.sessionStartTime) / 1000)
 
     this.collectStat({
@@ -324,16 +374,6 @@ export class StatsCollector implements StoreInterface, CacheableStore {
    * Cleanup and dispose of resources
    */
   dispose(): void {
-    // Clean up all listeners
-    this.cleanupFunctions.forEach((cleanup) => cleanup())
-    this.cleanupFunctions = []
-
-    // Stop resource monitoring
-    if (this.resourceMonitorInterval) {
-      clearInterval(this.resourceMonitorInterval)
-      this.resourceMonitorInterval = null
-    }
-
     // Collect final stats
     this.collectSessionCloseStats().catch((error) => {
       Logger.error('Failed to collect session close stats', {
@@ -342,6 +382,10 @@ export class StatsCollector implements StoreInterface, CacheableStore {
         source: 'statsCollector'
       })
     })
+
+    this.stopCollection()
+    this.settingsCleanup?.()
+    this.settingsCleanup = null
 
     this._initialized = false
     Logger.info('Stats collector disposed', {

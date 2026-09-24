@@ -12,6 +12,7 @@ import {
   AppSettings
 } from '@deskthing/types'
 import Logger from '@server/utils/logger'
+import { getData, setData, overwriteData } from '@server/services/files/dataFileService'
 
 vi.mock('@server/services/files/dataFileService', () => ({
   getData: vi.fn(),
@@ -38,6 +39,7 @@ describe('AppDataStore', () => {
   let mockTaskStore: TaskStoreClass
 
   beforeEach(() => {
+    vi.useFakeTimers()
     mockAppStore = {
       get: vi.fn().mockReturnValue({ manifest: { version: '0.0.0' } }),
       getOrder: vi.fn().mockReturnValue(['app1', 'app2']),
@@ -55,7 +57,36 @@ describe('AppDataStore', () => {
   })
 
   afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
     vi.clearAllMocks()
+  })
+
+  it('flushes pending app data before cache cleanup returns', async () => {
+    appDataStore['appDataCache'] = { app1: { version: '1.0.0', data: { count: 1 } } }
+    await appDataStore.clearCache()
+    expect(setData).toHaveBeenCalledWith('app1', expect.objectContaining({ data: { count: 1 } }))
+    expect(appDataStore['appDataCache'].app1).toBeUndefined()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retains dirty cache and rejects shutdown flush if persistence fails', async () => {
+    appDataStore['appDataCache'] = { app1: { version: '1.0.0', data: { count: 1 } } }
+    vi.mocked(setData).mockRejectedValueOnce(new Error('disk full'))
+    await expect(appDataStore.saveToFile()).rejects.toThrow('Unable to flush')
+    expect(appDataStore['appDataCache'].app1.data).toEqual({ count: 1 })
+  })
+
+  it('does not replace pending edits with older persisted data on read', async () => {
+    appDataStore['appDataCache'] = { app1: { version: '0.0.0', data: { count: 2 } } }
+    vi.mocked(getData).mockResolvedValueOnce({ version: '0.0.0', data: { count: 1, old: true } })
+    expect((await appDataStore.getAppData('app1'))?.data).toEqual({ count: 2, old: true })
+  })
+
+  it('deletes falsy persisted values', async () => {
+    vi.mocked(getData).mockResolvedValueOnce({ version: '0.0.0', data: { count: 0, flag: false } })
+    await appDataStore.delData('app1', ['count', 'flag'])
+    expect(overwriteData).toHaveBeenCalledWith('app1', expect.objectContaining({ data: {} }))
   })
 
   describe('Task Management', () => {

@@ -116,7 +116,7 @@ export type DiscordWebhookData = {
       required?: boolean
       value?: string
     }>
-  }>[]  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }>[] // eslint-disable-next-line @typescript-eslint/no-explicit-any
   files?: any[]
   payload_json?: string
   attachments?: Array<{

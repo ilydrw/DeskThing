@@ -44,18 +44,14 @@ const Overlay: React.FC<DownloadConfirmationProps> = ({
 
   return (
     <div
-      className={`fixed ${isClosing ? 'animate-fade-out' : 'animate-fade'} inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50`}
+      className={`overlay-backdrop fixed ${isClosing ? 'animate-fade-out' : 'animate-fade'} inset-0 flex items-center justify-center z-50 p-4`}
     >
-      <div ref={overlayRef} className={`relative bg-black rounded-lg ${className}`}>
-        <div className="first:absolute top-2 right-2 w-fit h-fit flex">
+      <div ref={overlayRef} className={`overlay-surface relative ${className || ''}`}>
+        <div className="absolute top-3 right-3 z-20 w-fit h-fit flex gap-1">
           {showFeedbackButton && (
-            <FeedbackButton
-              onClick={handleClose}
-              className={'hover:bg-black bg-zinc-900'}
-              showText={false}
-            />
+            <FeedbackButton onClick={handleClose} className="action-button !p-2" showText={false} />
           )}
-          <Button title="Close Window" className="hover:bg-black bg-zinc-900" onClick={handleClose}>
+          <Button title="Close Window" className="action-button !p-2" onClick={handleClose}>
             <IconX />
           </Button>
         </div>

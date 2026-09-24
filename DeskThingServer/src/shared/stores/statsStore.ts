@@ -7,7 +7,7 @@ export interface StatsStoreClass extends CacheableStore, StoreInterface {
   initialize(): Promise<void>
   clearCache(): Promise<void>
   saveToFile(): Promise<void>
-  register(registration: Registration): Promise<void>
+  register(registration: Registration): Promise<boolean>
   collect(stat: Stats[number]): Promise<void>
   dispose(): void
 }

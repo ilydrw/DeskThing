@@ -6,6 +6,7 @@ import os from 'os'
 import { StatsStoreClass } from '@shared/stores/statsStore'
 import { handleError } from '@server/utils/errorHandler'
 import { SettingsStoreClass } from '@shared/stores/settingsStore'
+import { getServiceConfig } from '@server/config/serviceConfig'
 
 export class StatsStore implements StatsStoreClass {
   private stats: DeskThingStats | null = null
@@ -13,8 +14,10 @@ export class StatsStore implements StatsStoreClass {
   private _initialized = false
   private _registered = false
   private _flushing = false
+  private _enabling = false
   private collectStats = false
   private flushInterval: NodeJS.Timeout | null = null
+  private removeSettingsListener: (() => void) | null = null
   private readonly FLUSH_INTERVAL = 60 * 60 * 1000 * 12 // 12 hours
 
   public get initialized(): boolean {
@@ -26,63 +29,105 @@ export class StatsStore implements StatsStoreClass {
   async initialize(): Promise<void> {
     if (this._initialized) return
 
+    this.collectStats = (await this.settingStore.getSetting('flag_collectStats')) === true
+    this.removeSettingsListener = this.settingStore.on(
+      'flag_collectStats',
+      async (collectStats) => {
+        this.collectStats = collectStats
+
+        if (collectStats) {
+          logger.info('User opted in to stats collection', {
+            function: 'settings-updated',
+            source: 'statsStore'
+          })
+          await this.enableCollection()
+        } else {
+          this.disableCollection()
+          logger.info('User opted out of stats collection', {
+            function: 'settings-updated',
+            source: 'statsStore'
+          })
+        }
+      }
+    )
+
+    this._initialized = true
+
+    if (this.collectStats) {
+      await this.enableCollection()
+    } else {
+      logger.info('Stats collection is disabled', {
+        function: 'initialize',
+        source: 'statsStore'
+      })
+    }
+  }
+
+  private async enableCollection(): Promise<void> {
+    if (this.stats || this._enabling || !this.collectStats) return
+
+    const { statsUrl } = getServiceConfig()
+    if (!statsUrl) {
+      logger.warn('Stats collection is enabled, but no valid stats service is configured', {
+        function: 'enableCollection',
+        source: 'statsStore'
+      })
+      return
+    }
+
+    this._enabling = true
+
     try {
-      let privateKeyData = process.env.STATS_PRIVATE_KEY
-      let clientId = process.env.STATS_CLIENT_ID
+      let privateKeyData = process.env.DESKTHING_STATS_PRIVATE_KEY
+      let clientId = process.env.DESKTHING_STATS_CLIENT_ID
 
       if (!privateKeyData || !clientId) {
         const machineData = await getMachineId()
         privateKeyData = machineData.privateKey
-        clientId = machineData.clientId // Use the generated client ID
+        clientId = machineData.clientId
 
         logger.info('Using machine-generated keys for stats', {
-          function: 'initialize',
+          function: 'enableCollection',
           source: 'statsStore'
         })
       }
 
       const privateKey = await DeskThingStats.readPrivateKey(privateKeyData)
-      this.stats = new DeskThingStats(clientId, privateKey)
+      this.stats = new DeskThingStats(clientId, privateKey, { baseUrl: statsUrl })
 
-      // Handle registration on first initialization
       await this.ensureRegistration()
-
       this.startFlushInterval()
-      this._initialized = true
 
-      logger.info('Stats store initialized', {
-        function: 'initialize',
+      logger.info('Stats collection initialized', {
+        function: 'enableCollection',
         source: 'statsStore'
       })
     } catch (error) {
-      logger.error('Failed to initialize stats store', {
+      this.stats = null
+      logger.error('Failed to initialize stats collection', {
         error: error as Error,
-        function: 'initialize',
+        function: 'enableCollection',
         source: 'statsStore'
       })
+    } finally {
+      this._enabling = false
+    }
+  }
+
+  private disableCollection(): void {
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval)
+      this.flushInterval = null
     }
 
-    this.collectStats = (await this.settingStore.getSetting('flag_collectStats')) || false
-
-    this.settingStore.on('flag_collectStats', async (collectStats) => {
-      if (collectStats) {
-        this.collectStats = collectStats
-        logger.info('User opted in to stats collection', {
-          function: 'settings-updated',
-          source: 'statsStore'
-        })
-      } else {
-        this.collectStats = false
-        logger.info('User opted out of stats collection', {
-          function: 'settings-updated',
-          source: 'statsStore'
-        })
-      }
-    })
+    this.statsQueue.clear()
+    this.stats = null
+    this._registered = false
+    this._flushing = false
   }
 
   private async ensureRegistration(): Promise<void> {
-    if (!this.stats || this._registered) return
+    if (!this.stats || this._registered || !this.collectStats) return
 
     try {
       const machineData = await getMachineId()
@@ -94,8 +139,7 @@ export class StatsStore implements StatsStoreClass {
         memory: os.totalmem()
       }
 
-      await this.register(registration)
-      this._registered = true
+      this._registered = await this.register(registration)
     } catch (error) {
       logger.error('Failed to ensure registration', {
         error: error as Error,
@@ -126,13 +170,13 @@ export class StatsStore implements StatsStoreClass {
     await this.flush()
   }
 
-  async register(registration: Registration): Promise<void> {
-    if (!this.stats) {
-      logger.warn('Stats not initialized', {
+  async register(registration: Registration): Promise<boolean> {
+    if (!this.stats || !this.collectStats) {
+      logger.warn('Stats collection is not available', {
         function: 'register',
         source: 'statsStore'
       })
-      return
+      return false
     }
 
     if (process.env.NODE_ENV == 'development') {
@@ -140,7 +184,7 @@ export class StatsStore implements StatsStoreClass {
         function: 'register',
         source: 'statsStore'
       })
-      return
+      return true
     }
 
     try {
@@ -152,12 +196,14 @@ export class StatsStore implements StatsStoreClass {
         function: 'register',
         source: 'statsStore'
       })
+      return true
     } catch (error) {
       logger.error('Failed to register', {
         error: error as Error,
         function: 'register',
         source: 'statsStore'
       })
+      return false
     }
   }
 
@@ -199,6 +245,8 @@ export class StatsStore implements StatsStoreClass {
   }
 
   async collect(stat: Stats[number]): Promise<void> {
+    if (!this.collectStats || !this.stats) return
+
     const key = this.generateStatKey(stat)
     const timestamp = Date.now()
 
@@ -260,9 +308,7 @@ export class StatsStore implements StatsStoreClass {
   }
 
   private async flush(): Promise<void> {
-    if (!this.stats || this.statsQueue.size === 0) return
-
-    if (this.statsQueue.size === 0) return
+    if (!this.collectStats || !this.stats || this.statsQueue.size === 0) return
 
     if (this._flushing) {
       logger.debug('Flush already in progress, skipping', {
@@ -276,22 +322,11 @@ export class StatsStore implements StatsStoreClass {
     const statsToSend = this.getSortedStats()
 
     try {
-      if (!this.collectStats) {
-        logger.debug('Skipping stats flush due to user settings', {
-          function: 'flush',
-          source: 'statsStore'
-        })
-        this.statsQueue.clear()
-        this._flushing = false
-        return
-      }
-
       if (process.env.NODE_ENV == 'development') {
         logger.debug('Skipping stats flush in development mode', {
           function: 'flush',
           source: 'statsStore'
         })
-        this._flushing = false
         return
       }
 
@@ -319,7 +354,12 @@ export class StatsStore implements StatsStoreClass {
   dispose(): void {
     if (this.flushInterval) {
       clearInterval(this.flushInterval)
+      this.flushInterval = null
     }
+
+    this.removeSettingsListener?.()
+    this.removeSettingsListener = null
+
     this.flush().catch((error) => {
       logger.error('Failed to flush stats during disposal', {
         error: error as Error,
@@ -327,5 +367,7 @@ export class StatsStore implements StatsStoreClass {
         source: 'statsStore'
       })
     })
+
+    this._initialized = false
   }
 }

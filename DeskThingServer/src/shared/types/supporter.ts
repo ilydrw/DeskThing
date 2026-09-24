@@ -6,7 +6,6 @@ export type Supporter = {
   timestamp: number
 }
 
-
 export type SupporterData = {
   monthly: Member[]
   onetime: Supporter[]

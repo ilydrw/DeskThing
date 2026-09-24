@@ -32,7 +32,10 @@ export const TaskExternalComponent: FC<StepPropsMap[STEP_TYPES.EXTERNAL]> = ({ s
       </div>
       <div className="flex justify-between gap-5">
         {step.url && (
-          <Button className="w-full bg-cyan-700 hover:bg-cyan-600 gap-2" onClick={handleLinkPress}>
+          <Button
+            className="w-full bg-emerald-700 hover:bg-emerald-600 gap-2"
+            onClick={handleLinkPress}
+          >
             <p className="text-nowrap">Go to {step.url}</p>
             <IconLink />
           </Button>

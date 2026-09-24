@@ -49,7 +49,7 @@ export const TaskTaskComponent: FC<StepPropsMap[STEP_TYPES.TASK]> = ({ step, sou
           {stepCompleted && <p className="italic text-xs text-gray-400">Task is Completed</p>}
           <Button
             title="Open Tasks notification"
-            className="gap-2 bg-cyan-700 hover:bg-cyan-600"
+            className="gap-2 bg-emerald-700 hover:bg-emerald-600"
             onClick={openTasks}
           >
             <p>Open {step.taskReference?.id} task</p>

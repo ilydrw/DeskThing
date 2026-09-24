@@ -59,8 +59,9 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-itsriprod@gmail.com.
+reported privately to the maintainers of the repository distributing this
+fork. The project must publish an accountable moderation contact before opening
+official community spaces.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
