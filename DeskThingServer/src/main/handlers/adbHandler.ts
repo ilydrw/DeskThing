@@ -32,38 +32,55 @@ const splitArgs = (str: string): string[] => {
   return matches
 }
 
+export const DEFAULT_ADB_TIMEOUT_MS = 120_000
+
+export type AdbCommandOptions = {
+  /** Kills the adb process after this long so a hung device cannot block its command queue. */
+  timeoutMs?: number
+  /** Skips progress notifications and info logs for background polling. */
+  quiet?: boolean
+}
+
 /**
  * Executes an ADB command and returns the output.
  * @param command - The ADB command to execute.
- * @param replyFn - An optional callback function to handle logging.
+ * @param options - Timeout and reporting options.
  * @channel - {@link ProgressChannel.ADB}
  * @returns A Promise that resolves with the output of the ADB command.
  */
-export const handleAdbCommands = async (command: string): Promise<string> => {
-  const update = progressBus.start(ProgressChannel.ADB, 'ADB - Runner', 'Executing ADB Command')
+export const handleAdbCommands = async (
+  command: string,
+  options: AdbCommandOptions = {}
+): Promise<string> => {
+  const { timeoutMs = DEFAULT_ADB_TIMEOUT_MS, quiet = false } = options
+  const update = quiet
+    ? (): void => undefined
+    : progressBus.start(ProgressChannel.ADB, 'ADB - Runner', 'Executing ADB Command')
   const settingsStore = await storeProvider.getStore('settingsStore')
   const useGlobalADB = await settingsStore.getSetting('adb_useGlobal')
-  Logger.info(useGlobalADB ? 'Using Global ADB' : 'Using Local ADB')
+  if (!quiet) Logger.info(useGlobalADB ? 'Using Global ADB' : 'Using Local ADB')
   update(`Executing ${command} using ${useGlobalADB ? 'Global ADB' : 'Local ADB'}`, 10)
   return new Promise((resolve, reject) => {
     execFile(
       useGlobalADB ? 'adb' : adbPath,
       splitArgs(command),
-      { cwd: execPath },
+      { cwd: execPath, timeout: timeoutMs, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
-          progressBus.error(ProgressChannel.ADB, 'Error Encountered!', error.message)
+          const timedOut = error.killed === true
+          const reason = timedOut ? `timed out after ${timeoutMs}ms` : stderr
+          if (!quiet) progressBus.error(ProgressChannel.ADB, 'Error Encountered!', error.message)
           Logger.error(
-            `ADB Error: STDERR: ${stderr}  STDOUT: ${stdout}, COMMAND: ${command}, PATH: ${adbPath}`,
+            `ADB Error: ${timedOut ? 'TIMEOUT' : `STDERR: ${stderr}`}  STDOUT: ${stdout}, COMMAND: ${command}, PATH: ${adbPath}`,
             {
               error: error as Error,
               function: 'adbHandler',
               source: 'adbHandler'
             }
           )
-          reject(new Error(`ADB Error: ${stderr}, ${command}, ${adbPath}`))
+          reject(new Error(`ADB Error: ${reason}, ${command}, ${adbPath}`))
         } else {
-          progressBus.complete(ProgressChannel.ADB, 'ADB Success!')
+          if (!quiet) progressBus.complete(ProgressChannel.ADB, 'ADB Success!')
           resolve(stdout)
         }
       }

@@ -35,10 +35,12 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
   private settingsCleanup: (() => void) | null = null
   private autoDetect = false
   private refreshInProgress = false
+  private healthCheckInProgress = false
   private missingDeviceChecks: Map<string, number> = new Map()
   private adbPort: number = 8891
-  private readonly HEALTH_CHECK_INTERVAL = 30000
-  private readonly MISSED_CHECKS_BEFORE_DISCONNECT = 2
+  // Short enough that a replugged or rebooted device gets its reverse port back quickly.
+  private readonly HEALTH_CHECK_INTERVAL = 10000
+  private readonly MISSED_CHECKS_BEFORE_DISCONNECT = 3
 
   public readonly id: PlatformIDs = PlatformIDs.ADB
   public readonly name: string = 'ADB'
@@ -357,9 +359,26 @@ export class ADBPlatform extends EventEmitter<PlatformEvents> implements Platfor
     }, this.HEALTH_CHECK_INTERVAL)
   }
 
-  private async runHealthCheck(): Promise<void> {
-    if (!this.isActive || this.refreshInProgress) return
+  /**
+   * Immediately restores port mappings and device state, e.g. after the host resumes from sleep.
+   * Respects the auto-detect setting so devices are never probed while it is disabled.
+   */
+  async checkConnections(): Promise<void> {
+    if (!this.autoDetect) return
+    await this.runHealthCheck()
+  }
 
+  private async runHealthCheck(): Promise<void> {
+    if (!this.isActive || this.refreshInProgress || this.healthCheckInProgress) return
+    this.healthCheckInProgress = true
+    try {
+      await this.checkDevices()
+    } finally {
+      this.healthCheckInProgress = false
+    }
+  }
+
+  private async checkDevices(): Promise<void> {
     const devices = await this.adbService.getDevices()
     const currentDeviceIds = this.clients
       .map((client) => client.identifiers[this.id]?.id)

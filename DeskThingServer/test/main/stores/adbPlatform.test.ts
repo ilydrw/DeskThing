@@ -101,27 +101,47 @@ describe('ADBPlatform health recovery', () => {
     expect(platform.getClients().map((client) => client.clientId)).toEqual(['device-b'])
   })
 
-  it('requires two missed checks before disconnecting a device', async () => {
+  it('requires three missed checks before disconnecting a device', async () => {
     await platform.start({ port: 8891 })
     const disconnected = vi.fn()
     platform.on(PlatformEvent.CLIENT_DISCONNECTED, disconnected)
     mocks.getDevices.mockResolvedValue([])
+    const runHealthCheck = (): Promise<void> =>
+      (platform as unknown as { runHealthCheck(): Promise<void> }).runHealthCheck()
 
-    await (
-      platform as unknown as {
-        runHealthCheck(): Promise<void>
-      }
-    ).runHealthCheck()
+    await runHealthCheck()
+    await runHealthCheck()
     expect(platform.getClients()).toHaveLength(1)
     expect(disconnected).not.toHaveBeenCalled()
 
-    await (
-      platform as unknown as {
-        runHealthCheck(): Promise<void>
-      }
-    ).runHealthCheck()
+    await runHealthCheck()
     expect(platform.getClients()).toHaveLength(0)
     expect(disconnected).toHaveBeenCalledOnce()
+  })
+
+  it('does not overlap health checks while ADB is slow', async () => {
+    await platform.start({ port: 8891 })
+    mocks.getDevices.mockClear()
+    let release: (devices: string[]) => void = () => undefined
+    mocks.getDevices.mockReturnValueOnce(new Promise<string[]>((resolve) => (release = resolve)))
+    const runHealthCheck = (): Promise<void> =>
+      (platform as unknown as { runHealthCheck(): Promise<void> }).runHealthCheck()
+
+    const first = runHealthCheck()
+    await runHealthCheck()
+    release(['device-a'])
+    await first
+
+    expect(mocks.getDevices).toHaveBeenCalledOnce()
+  })
+
+  it('restores reverse ports immediately when asked to re-check connections', async () => {
+    await platform.start({ port: 8891 })
+    mocks.openPort.mockClear()
+
+    await platform.checkConnections()
+
+    expect(mocks.openPort).toHaveBeenCalledWith('device-a', 8891)
   })
 
   it('retains other devices during a forced client refresh', async () => {
@@ -142,6 +162,7 @@ describe('ADBPlatform health recovery', () => {
     mocks.getSetting.mockResolvedValue(false)
 
     await platform.start({ port: 8891 })
+    await platform.checkConnections()
 
     expect(mocks.getDevices).not.toHaveBeenCalled()
     expect(mocks.openPort).not.toHaveBeenCalled()

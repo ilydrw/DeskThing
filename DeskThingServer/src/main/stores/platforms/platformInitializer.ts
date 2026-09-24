@@ -1,8 +1,12 @@
+import { powerMonitor } from 'electron'
 import Logger from '@server/utils/logger'
 import { storeProvider } from '@server/stores/storeProvider'
 import { WebSocketPlatform } from './websocket/wsPlatform'
 import { ADBPlatform } from './superbird/adbPlatform'
 import { getDeviceConnectionOptions } from './platformConfig'
+
+/** Gives USB devices and network interfaces time to come back after the host wakes. */
+export const RESUME_RECHECK_DELAY_MS = 3000
 
 export async function initializePlatforms(): Promise<void> {
   try {
@@ -21,6 +25,17 @@ export async function initializePlatforms(): Promise<void> {
 
     await platformStore.startPlatform(adbPlatform.id, {
       port: connectionOptions.port
+    })
+
+    // Sleep drops ADB reverse-port mappings and can leave half-open sockets behind.
+    powerMonitor.on('resume', () => {
+      Logger.info('Host resumed; re-checking device connections', {
+        source: 'platformInitializer',
+        function: 'resume'
+      })
+      setTimeout(() => {
+        void Promise.allSettled([wsPlatform.checkConnections(), adbPlatform.checkConnections()])
+      }, RESUME_RECHECK_DELAY_MS)
     })
 
     Logger.debug('Platforms initialized successfully', {

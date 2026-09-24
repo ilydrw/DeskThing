@@ -42,9 +42,17 @@ export class WSPlatform {
   private userDataPath: string
   private expressServer: ExpressServer | null = null
   private healthCheckInterval: NodeJS.Timeout | null = null
-  private healthCheckFailures = new Map<string, number>()
-  private readonly HEALTH_CHECK_INTERVAL = 30000
-  private readonly HEALTH_CHECK_FAILURE_LIMIT = 2
+  private lastHealthCheck = 0
+  /** Last time each socket sent a message or answered a protocol ping. */
+  private lastActivity = new WeakMap<WebSocket, number>()
+  private readonly HEALTH_CHECK_INTERVAL = 15000
+  /**
+   * A session is closed only after this long without any traffic. Protocol pings are answered by
+   * the device's network stack, so a busy client UI does not look dead.
+   */
+  private readonly HEALTH_CHECK_TIMEOUT = 45000
+  private readonly HANDSHAKE_PING_TIMEOUT = 5000
+  private readonly MAX_HANDSHAKE_BUFFER = 100
   private options: PlatformConnectionOptions<AdditionalOptions> = {
     port: 8891,
     address: 'localhost'
@@ -100,6 +108,18 @@ export class WSPlatform {
 
     this.server.on('connection', this.handleConnection.bind(this))
 
+    this.server.on('error', (error) => {
+      const target = `${address || 'all interfaces'}:${port}`
+      const message =
+        (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+          ? `Port ${port} is already in use. Close the other program or choose another device port.`
+          : `WebSocket server failed on ${target}: ${error.message}`
+      console.error(message)
+      this.sendToParent({ event: PlatformEvent.ERROR, data: new Error(message, { cause: error }) })
+      // Let the parent restart this worker with backoff.
+      throw error
+    })
+
     this.server.on('listening', () => {
       this.sendToParent({ event: PlatformEvent.SERVER_STARTED, data: { port, address } })
     })
@@ -122,7 +142,7 @@ export class WSPlatform {
       client.socket.terminate()
     })
     this.clients.clear()
-    this.healthCheckFailures.clear()
+    this.lastHealthCheck = 0
 
     if (this.server) {
       this.server.close()
@@ -154,23 +174,58 @@ export class WSPlatform {
     }, this.HEALTH_CHECK_INTERVAL)
   }
 
-  private async runHealthCheck(): Promise<void> {
-    const clientIds = Array.from(this.clients.keys())
-    await Promise.all(
-      clientIds.map(async (clientId) => {
-        const result = await this.pingClient(clientId)
-        if (this.isSuccessfulPing(result)) {
-          this.healthCheckFailures.delete(clientId)
-          return
-        }
+  private markActivity(socket: WebSocket, at = Date.now()): void {
+    this.lastActivity.set(socket, at)
+  }
 
-        const failures = (this.healthCheckFailures.get(clientId) ?? 0) + 1
-        this.healthCheckFailures.set(clientId, failures)
-        if (failures >= this.HEALTH_CHECK_FAILURE_LIMIT) {
-          await this.handleClientDisconnected(clientId)
-        }
-      })
-    )
+  private trackActivity(socket: WebSocket): void {
+    this.markActivity(socket)
+    const mark = (): void => this.markActivity(socket)
+    socket.on('pong', mark)
+    socket.on('message', mark)
+  }
+
+  /** Gives every session a fresh liveness window, e.g. after the host slept. */
+  private restartLivenessWindow(): void {
+    const now = Date.now()
+    this.clients.forEach(({ socket }) => this.markActivity(socket, now))
+  }
+
+  /** Re-checks every session immediately, e.g. after the host resumes from sleep. */
+  async checkConnections(): Promise<void> {
+    this.restartLivenessWindow()
+    await this.runHealthCheck()
+  }
+
+  private async runHealthCheck(): Promise<void> {
+    const now = Date.now()
+    const wasSuspended =
+      this.lastHealthCheck > 0 && now - this.lastHealthCheck > this.HEALTH_CHECK_INTERVAL * 2
+    this.lastHealthCheck = now
+
+    // Timers do not run while the host sleeps; do not mistake that gap for client silence.
+    if (wasSuspended) {
+      console.info('Host appears to have been suspended; re-validating WebSocket sessions')
+      this.restartLivenessWindow()
+    }
+
+    for (const [clientId, { socket }] of Array.from(this.clients.entries())) {
+      // Pending connections are bounded by the handshake's own timeouts.
+      if (clientId.startsWith('pending-')) continue
+
+      const idleFor = now - (this.lastActivity.get(socket) ?? 0)
+      if (socket.readyState !== WebSocket.OPEN || idleFor >= this.HEALTH_CHECK_TIMEOUT) {
+        console.warn(`Closing unresponsive WebSocket session ${clientId} (idle ${idleFor}ms)`)
+        await this.handleClientDisconnected(clientId)
+        continue
+      }
+
+      try {
+        socket.ping()
+      } catch (error) {
+        console.error(`Failed to ping ${clientId}:`, error)
+      }
+    }
   }
 
   private isSuccessfulPing(result: { server?: number; socket?: number }): boolean {
@@ -180,7 +235,6 @@ export class WSPlatform {
   private replaceClientConnection(clientId: string, client: Client, socket: WebSocket): void {
     const existingConnection = this.clients.get(clientId)
     this.clients.set(clientId, { client, socket })
-    this.healthCheckFailures.delete(clientId)
 
     if (existingConnection && existingConnection.socket !== socket) {
       console.info(`Replacing stale WebSocket session for ${clientId}`)
@@ -223,6 +277,15 @@ export class WSPlatform {
     }
 
     this.clients.set(platformConnectionId, { client: pendingClient, socket })
+    this.trackActivity(socket)
+
+    // Clients often send their first requests right away. Hold them until the handshake
+    // finishes instead of dropping them, which would leave the device without initial data.
+    const handshakeBuffer: WebSocket.Data[] = []
+    const bufferMessage = (message: WebSocket.Data): void => {
+      if (handshakeBuffer.length < this.MAX_HANDSHAKE_BUFFER) handshakeBuffer.push(message)
+    }
+    socket.on('message', bufferMessage)
 
     try {
       console.debug(
@@ -244,7 +307,9 @@ export class WSPlatform {
         new Promise<boolean>((resolve) => {
           socket.once('pong', () => resolve(true))
         }),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2000))
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), this.HANDSHAKE_PING_TIMEOUT)
+        )
       ])
 
       if (!pingResult) {
@@ -289,8 +354,11 @@ export class WSPlatform {
       }
 
       const result = await this.pingClient(platformConnectionId, socket, false)
+      const answeredPing = this.isSuccessfulPing(result)
 
-      if (!this.isSuccessfulPing(result)) {
+      // The protocol pong already proved the link works. Also require the client to identify
+      // itself through either its manifest or an application-level pong.
+      if (socket.readyState !== WebSocket.OPEN || (!answeredPing && !manifest)) {
         console.error(`Failed establishing a connection with ${finalClientId}.`)
         socket?.close?.()
         socket?.terminate?.()
@@ -298,11 +366,15 @@ export class WSPlatform {
         return
       }
 
+      if (!answeredPing) {
+        console.warn(`${finalClientId} did not answer the application ping; accepting its manifest`)
+      }
+
       finalClient.meta = {
         ...finalClient.meta,
         [PlatformIDs.WEBSOCKET]: {
           wsId: finalClientId,
-          ping: result
+          ...(answeredPing ? { ping: result } : {})
         }
       }
 
@@ -316,7 +388,11 @@ export class WSPlatform {
         event: PlatformEvent.CLIENT_CONNECTED,
         data: finalClient
       })
+      socket.off('message', bufferMessage)
       this.setupMessageHandling(finalClientId, socket)
+      for (const message of handshakeBuffer) {
+        this.handleMessage(finalClientId, message, true)
+      }
     } catch (error) {
       console.error(`Failed to stabilize connection for client ${platformConnectionId}:`, error)
       if (socket.readyState === WebSocket.OPEN) {
@@ -327,61 +403,7 @@ export class WSPlatform {
   }
 
   private setupMessageHandling(clientId: string, socket: WebSocket): void {
-    socket.on('message', (message: WebSocket.Data) => {
-      try {
-        let messageStr: string
-        if (typeof message === 'string') {
-          messageStr = message
-        } else if (message instanceof Buffer) {
-          messageStr = message.toString('utf8')
-        } else if (Array.isArray(message)) {
-          messageStr = Buffer.concat(message).toString('utf8')
-        } else {
-          console.error(`Received unsupported message type from ${clientId}: ${message}`)
-          return
-        }
-
-        const data = JSON.parse(messageStr) as DeviceToDeskthingData & { clientId: string }
-        const platformInternalId = this.getInternalId(clientId || data.clientId)
-
-        if (!platformInternalId) {
-          console.error(`Unable to find record of ${clientId}. Cancelling message`)
-          console.log('Available clientIds:', Array.from(this.clients.keys()))
-          return
-        }
-
-        const clientObj = this.clients.get(platformInternalId)
-
-        if (clientObj) {
-          const client = clientObj.client
-          this.ensureConnected(client)
-
-          if (data.type == DEVICE_DESKTHING.PING) {
-            console.log(`Got a ping from the client`)
-            this.sendData(client.clientId, {
-              type: DESKTHING_DEVICE.PONG,
-              payload: client.clientId,
-              app: 'client'
-            })
-          }
-
-          this.sendToParent({
-            event: PlatformEvent.DATA_RECEIVED,
-            data: { client, data }
-          })
-        } else {
-          console.error(
-            `Socket not open or client not registered ${clientId} ${JSON.stringify({ ...data, payload: 'Scrubbed payload' })}`
-          )
-        }
-      } catch (error) {
-        console.error(`Error parsing message from ${clientId}: ${error}`)
-        this.sendToParent({
-          event: PlatformEvent.ERROR,
-          data: new Error(`Invalid message format: ${error}`)
-        })
-      }
-    })
+    socket.on('message', (message: WebSocket.Data) => this.handleMessage(clientId, message))
 
     socket.on('close', () => {
       const currentId = clientId
@@ -390,7 +412,6 @@ export class WSPlatform {
       const currentClient = currentConnection.client
 
       this.clients.delete(currentId)
-      this.healthCheckFailures.delete(currentId)
       this.sendToParent({
         event: PlatformEvent.CLIENT_DISCONNECTED,
         data: currentClient
@@ -411,9 +432,8 @@ export class WSPlatform {
       console.error(`WebSocket error for client ${currentId}:`, error)
       this.sendToParent({ event: PlatformEvent.ERROR, data: error })
 
-      // Clean up if the client is still in pending state
       this.clients.delete(currentId)
-      this.healthCheckFailures.delete(currentId)
+      socket.terminate()
       this.sendToParent({
         event: PlatformEvent.CLIENT_DISCONNECTED,
         data: {
@@ -422,6 +442,73 @@ export class WSPlatform {
         }
       })
     })
+  }
+
+  /**
+   * Parses one client message and forwards it to the parent process.
+   * @param replay - true for messages held during the handshake; replies the handshake
+   * already consumed are skipped.
+   */
+  private handleMessage(clientId: string, message: WebSocket.Data, replay = false): void {
+    try {
+      let messageStr: string
+      if (typeof message === 'string') {
+        messageStr = message
+      } else if (message instanceof Buffer) {
+        messageStr = message.toString('utf8')
+      } else if (Array.isArray(message)) {
+        messageStr = Buffer.concat(message).toString('utf8')
+      } else {
+        console.error(`Received unsupported message type from ${clientId}: ${message}`)
+        return
+      }
+
+      const data = JSON.parse(messageStr) as DeviceToDeskthingData & { clientId: string }
+      if (
+        replay &&
+        (data.type === DEVICE_DESKTHING.PONG || data.type === DEVICE_DESKTHING.MANIFEST)
+      ) {
+        return
+      }
+      const platformInternalId = this.getInternalId(clientId || data.clientId)
+
+      if (!platformInternalId) {
+        console.error(`Unable to find record of ${clientId}. Cancelling message`)
+        console.log('Available clientIds:', Array.from(this.clients.keys()))
+        return
+      }
+
+      const clientObj = this.clients.get(platformInternalId)
+
+      if (clientObj) {
+        const client = clientObj.client
+        this.ensureConnected(client)
+
+        if (data.type == DEVICE_DESKTHING.PING) {
+          console.log(`Got a ping from the client`)
+          this.sendData(client.clientId, {
+            type: DESKTHING_DEVICE.PONG,
+            payload: client.clientId,
+            app: 'client'
+          })
+        }
+
+        this.sendToParent({
+          event: PlatformEvent.DATA_RECEIVED,
+          data: { client, data }
+        })
+      } else {
+        console.error(
+          `Socket not open or client not registered ${clientId} ${JSON.stringify({ ...data, payload: 'Scrubbed payload' })}`
+        )
+      }
+    } catch (error) {
+      console.error(`Error parsing message from ${clientId}: ${error}`)
+      this.sendToParent({
+        event: PlatformEvent.ERROR,
+        data: new Error(`Invalid message format: ${error}`)
+      })
+    }
   }
 
   private ensureConnected: (
@@ -634,7 +721,6 @@ export class WSPlatform {
 
       if (clientConnection) {
         this.clients.delete(platformConnectionId)
-        this.healthCheckFailures.delete(platformConnectionId)
 
         if (clientConnection.socket.readyState === WebSocket.OPEN) {
           clientConnection.socket.terminate()
@@ -879,6 +965,9 @@ if (parentPort) {
         break
       case 'updateClient':
         platform.updateClient(message.clientId, message.client, message.notify)
+        break
+      case 'checkConnections':
+        await platform.checkConnections()
         break
       case 'getStatus':
         platform.getStatus()

@@ -1,4 +1,4 @@
-import { handleAdbCommands } from '../../../handlers/adbHandler'
+import { AdbCommandOptions, handleAdbCommands } from '../../../handlers/adbHandler'
 import logger from '@server/utils/logger'
 import { ClientConnectionMethod } from '@deskthing/types'
 import { join } from 'path'
@@ -17,11 +17,16 @@ import { restartScript } from '@server/services/adb/restartScript'
 import { handleError } from '@server/utils/errorHandler'
 import { proxyScript } from '@server/services/adb/proxyScript'
 import { storeProvider } from '@server/stores/storeProvider'
+import { parseAdbDevices } from './adbDevices'
+
+/** Polling commands run every few seconds, so keep them quiet and short-lived. */
+const BACKGROUND_COMMAND: AdbCommandOptions = { timeoutMs: 15_000, quiet: true }
 
 export class ADBService implements ADBServiceClass {
   private commandQueues: {
     [deviceId: string]: {
       command: string
+      options?: AdbCommandOptions
       resolve: (value: string) => void
       reject: (error: unknown) => void
     }[]
@@ -50,7 +55,11 @@ export class ADBService implements ADBServiceClass {
     })
   }
 
-  public async sendCommand(command: string, deviceId?: string): Promise<string> {
+  public async sendCommand(
+    command: string,
+    deviceId?: string,
+    options?: AdbCommandOptions
+  ): Promise<string> {
     const queueKey = deviceId || 'default'
 
     if (deviceId && this.blacklist.includes(deviceId)) {
@@ -62,7 +71,7 @@ export class ADBService implements ADBServiceClass {
     }
 
     return new Promise((resolve, reject) => {
-      const queueItem = { command, resolve, reject }
+      const queueItem = { command, options, resolve, reject }
 
       if (!this.commandQueues[queueKey]) {
         this.commandQueues[queueKey] = []
@@ -86,7 +95,7 @@ export class ADBService implements ADBServiceClass {
         finalCommand = `-s ${queueKey} ${finalCommand}`
       }
 
-      const result = await handleAdbCommands(finalCommand)
+      const result = await handleAdbCommands(finalCommand, currentItem.options)
       currentItem.resolve(result)
     } catch (error) {
       currentItem.reject(error)
@@ -144,28 +153,8 @@ export class ADBService implements ADBServiceClass {
 
   public async getDevices(): Promise<string[]> {
     try {
-      const response = await this.sendCommand('devices -l')
-      const lines = response
-        .split('\n')
-        .filter(
-          (line) => line && !line.startsWith('List of devices attached') && line.trim() !== ''
-        )
-
-      const adbDevices: string[] = lines.reduce((acc, line) => {
-        if (line.includes('device')) {
-          const deviceId = line.replace('device', '').trim()
-
-          const adbId = deviceId.split(' ')[0]
-
-          return [...acc, adbId]
-        } else {
-          return acc
-        }
-      }, [] as string[])
-
-      const filteredDevices = adbDevices.filter((deviceId) => !this.blacklist.includes(deviceId))
-
-      return filteredDevices
+      const response = await this.sendCommand('devices -l', undefined, BACKGROUND_COMMAND)
+      return parseAdbDevices(response).filter((deviceId) => !this.blacklist.includes(deviceId))
     } catch (error) {
       logger.error('Failed to get ADB devices', {
         error: error as Error,
@@ -177,7 +166,7 @@ export class ADBService implements ADBServiceClass {
   }
 
   public async openPort(deviceId: string, port: number): Promise<void> {
-    await this.sendCommand(`reverse tcp:${port} tcp:${port}`, deviceId)
+    await this.sendCommand(`reverse tcp:${port} tcp:${port}`, deviceId, BACKGROUND_COMMAND)
   }
 
   public async restartChromium(deviceId: string): Promise<void> {

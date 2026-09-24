@@ -482,8 +482,23 @@ export class WebSocketPlatform extends EventEmitter<PlatformEvents> implements P
 
   fetchClients(): Promise<Client[]> {
     if (!this.worker) return Promise.resolve(this.clients)
-    this.worker?.postMessage({ type: 'fetchClients' })
-    return new Promise((resolve) => this.once(PlatformEvent.CLIENT_LIST, resolve))
+    return new Promise((resolve) => {
+      const resolveTask = (clients: Client[]): void => {
+        clearTimeout(timeoutRef)
+        this.removeListener(PlatformEvent.CLIENT_LIST, resolveTask)
+        resolve(clients)
+      }
+      // Fall back to the last known list if the worker is restarting or unresponsive.
+      const timeoutRef = setTimeout(() => resolveTask(this.clients), 5000)
+      this.on(PlatformEvent.CLIENT_LIST, resolveTask)
+      this.worker?.postMessage({ type: 'fetchClients' })
+    })
+  }
+
+  /** Asks the worker to re-validate every session now, e.g. after the host resumes. */
+  async checkConnections(): Promise<void> {
+    if (!this.isActive) return
+    this.worker?.postMessage({ type: 'checkConnections' })
   }
 
   getClientById(clientId: string): Client | undefined {

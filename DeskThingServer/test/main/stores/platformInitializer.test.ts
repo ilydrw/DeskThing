@@ -5,7 +5,14 @@ const mocks = vi.hoisted(() => ({
   getSetting: vi.fn(),
   getStore: vi.fn(),
   registerPlatform: vi.fn(),
-  startPlatform: vi.fn()
+  startPlatform: vi.fn(),
+  powerOn: vi.fn(),
+  wsCheck: vi.fn(),
+  adbCheck: vi.fn()
+}))
+
+vi.mock('electron', () => ({
+  powerMonitor: { on: mocks.powerOn }
 }))
 
 vi.mock('@server/stores/storeProvider', () => ({
@@ -17,23 +24,29 @@ vi.mock('@server/stores/storeProvider', () => ({
 vi.mock('@server/stores/platforms/websocket/wsPlatform', () => ({
   WebSocketPlatform: class {
     id = 'websocket'
+    checkConnections = mocks.wsCheck
   }
 }))
 
 vi.mock('@server/stores/platforms/superbird/adbPlatform', () => ({
   ADBPlatform: class {
     id = 'adb'
+    checkConnections = mocks.adbCheck
   }
 }))
 
 vi.mock('@server/utils/logger', () => ({
   default: {
     debug: vi.fn(),
+    info: vi.fn(),
     error: vi.fn()
   }
 }))
 
-import { initializePlatforms } from '@server/stores/platforms/platformInitializer'
+import {
+  initializePlatforms,
+  RESUME_RECHECK_DELAY_MS
+} from '@server/stores/platforms/platformInitializer'
 
 describe('initializePlatforms', () => {
   beforeEach(() => {
@@ -67,5 +80,23 @@ describe('initializePlatforms', () => {
     expect(mocks.startPlatform).toHaveBeenNthCalledWith(2, PlatformIDs.ADB, {
       port: 18991
     })
+  })
+
+  it('re-checks both transports after the host resumes from sleep', async () => {
+    vi.useFakeTimers()
+    try {
+      await initializePlatforms()
+      const [event, onResume] = mocks.powerOn.mock.calls[0]
+      expect(event).toBe('resume')
+
+      onResume()
+      expect(mocks.wsCheck).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(RESUME_RECHECK_DELAY_MS)
+
+      expect(mocks.wsCheck).toHaveBeenCalledOnce()
+      expect(mocks.adbCheck).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
