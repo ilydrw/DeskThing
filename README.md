@@ -1,6 +1,8 @@
 # DeskThing Community (working name)
 
-An independent community continuation of DeskThing, originally created by Riprod.
+An independent community continuation of [DeskThing](https://github.com/ItsRiprod/DeskThing),
+originally created by [Riprod](https://github.com/ItsRiprod). This fork is not affiliated with or
+endorsed by the original project; fixes that apply upstream are offered back to it.
 This fork is in development; public installers are not available yet.
 See the [public launch plan](docs/PUBLIC_LAUNCH.md) for release gates, product
 priorities, compatibility testing, and community ownership.
