@@ -137,7 +137,16 @@ describe('file service confinement', () => {
     })
   })
 
-  it.each(['../outside.json', '..\\outside.json', '.', ''])(
+  it('treats backslashes as separators on every platform', async () => {
+    await writeToFile({ value: 1 }, 'settings\\example.json')
+
+    await expect(
+      readFile(join(mocks.userDataPath, 'settings', 'example.json'), 'utf8')
+    ).resolves.toContain('"value": 1')
+    await expect(readFromFile('settings/example.json')).resolves.toEqual({ value: 1 })
+  })
+
+  it.each(['../outside.json', '..\\outside.json', 'settings\\..\\..\\outside.json', '.', ''])(
     'rejects path outside the user-data root: %j',
     async (filePath) => {
       await expect(writeToFile({ value: 1 }, filePath)).rejects.toThrow(

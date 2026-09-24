@@ -14,7 +14,11 @@ export class FileServiceError extends Error {
 
 const getUserDataFilePath = (relativePath: string): string => {
   const userDataPath = resolve(app.getPath('userData'))
-  const filePath = resolvePathWithinRoot(userDataPath, relativePath)
+  // POSIX treats `\` as a filename character, so `..\x` would silently become a file named
+  // `..\x` on Linux/macOS while escaping the root on Windows. Normalize so every platform
+  // interprets user-data paths the same way.
+  const portablePath = relativePath.replaceAll('\\', '/')
+  const filePath = resolvePathWithinRoot(userDataPath, portablePath)
   if (!filePath || filePath === userDataPath) {
     throw new FileServiceError('File path must remain within the user data directory')
   }
