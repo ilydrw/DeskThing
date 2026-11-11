@@ -17,11 +17,7 @@ const ServerRoutingListener = (): null => {
         setSearchParams(newParams)
       }
     }
-    window.electron.ipcRenderer.on('handle-protocol-url', handleServerRouting)
-
-    return () => {
-      window.electron.ipcRenderer.removeAllListeners('handle-protocol-url')
-    }
+    return window.electron.ipcRenderer.on('handle-protocol-url', handleServerRouting)
   }, [setSearchParams])
 
   return null

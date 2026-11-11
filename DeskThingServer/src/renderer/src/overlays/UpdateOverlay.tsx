@@ -13,13 +13,21 @@ const UpdateOverlay: React.FC = () => {
   const updateStatus = useUpdateStore((state) => state.updateStatus)
   const [expanded, setExpanded] = useState(false)
   const [progress, setProgress] = useState<UpdateProgressType | undefined>()
+  const [busy, setBusy] = useState(false)
 
-  const handleCheckClick = (): void => {
-    check()
+  const handleCheckClick = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await check()
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const handleDownloadClick = (): void => {
-    download()
+  const handleDownloadClick = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
     if (progress == undefined) {
       setProgress({
         total: 0,
@@ -28,16 +36,28 @@ const UpdateOverlay: React.FC = () => {
         speed: 0
       })
     }
+    try {
+      await download()
+    } finally {
+      setBusy(false)
+      setProgress(undefined)
+    }
   }
 
   useEffect(() => {
-    if (update.failed) {
+    if (update.failed || update.updateDownloaded) {
       setProgress(undefined)
     }
-  }, [update.failed])
+  }, [update.failed, update.updateDownloaded])
 
-  const handleInstallClick = (): void => {
-    install()
+  const handleInstallClick = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await install()
+    } finally {
+      setBusy(false)
+    }
   }
 
   useEffect(() => {
@@ -45,11 +65,7 @@ const UpdateOverlay: React.FC = () => {
       setProgress(data)
     }
 
-    window.electron.ipcRenderer.on('update-progress', handleUpdateProgress)
-
-    return () => {
-      window.electron.ipcRenderer.removeAllListeners('update-progress')
-    }
+    return window.electron.ipcRenderer.on('update-progress', handleUpdateProgress)
   }, [])
 
   const handleClose = (): void => {
@@ -59,28 +75,36 @@ const UpdateOverlay: React.FC = () => {
     })
   }
 
+  const parsedReleaseDate = update.releaseDate ? new Date(update.releaseDate) : undefined
+  const releaseDate =
+    parsedReleaseDate && !Number.isNaN(parsedReleaseDate.getTime())
+      ? parsedReleaseDate.toLocaleDateString()
+      : update.releaseDate
+
   return (
     <div className="fixed border gap-2 bottom-5 right-5 bg-black p-5 flex flex-col text-white rounded-md shadow-md z-50 max-h-screen">
       <div className="absolute top-1 right-1 hover:text-red-500">
-        <Button onClick={handleClose}>
+        <Button onClick={handleClose} title="Dismiss update notification">
           <IconX />
         </Button>
       </div>
       <h2 className={`text-3xl mr-10 ${update.failed ? 'text-red-500' : 'text-green-500'}`}>
-        {update.failed ? 'Update Failed :(' : `Release ${update.releaseName} is available`}
+        {update.failed
+          ? 'Update failed'
+          : `Release ${update.releaseName || update.version || ''} is available`}
       </h2>
       <div className="flex w-full justify-between">
         {(update.releaseDate || update.version) && (
           <div>
-            <p className="italic text-gray-600">Released: {update.releaseDate}</p>
-            <p className="italic text-gray-600">Version: {update.version}</p>
+            {releaseDate && <p className="italic text-gray-600">Released: {releaseDate}</p>}
+            {update.version && <p className="italic text-gray-600">Version: {update.version}</p>}
           </div>
         )}
         <div>
-          {progress !== undefined && !update.failed && (
+          {progress !== undefined && !update.failed && !update.updateDownloaded && (
             <div className="italic text-gray-500 text-xs font-geistMono">
               <p>Downloading... {progress.percent.toFixed(2)}%</p>
-              <p>{(progress.speed / 1048576).toFixed(2)} Mbps</p>
+              <p>{(progress.speed / 1048576).toFixed(2)} MiB/s</p>
               <p>
                 {(progress.transferred / 1048576).toFixed(2)}MB /{' '}
                 {(progress.total / 1048576).toFixed(2)}MB
@@ -91,11 +115,31 @@ const UpdateOverlay: React.FC = () => {
             <div className="max-w-xs text-sm text-zinc-400">
               Automatic update failed. Download the latest build from the repository that
               distributed this version.
+              <Button
+                className="mt-2 border border-zinc-500"
+                disabled={busy}
+                onClick={
+                  update.updateDownloaded
+                    ? handleInstallClick
+                    : update.updateAvailable
+                      ? handleDownloadClick
+                      : handleCheckClick
+                }
+              >
+                {busy
+                  ? 'Please wait…'
+                  : update.updateDownloaded
+                    ? 'Retry installation'
+                    : update.updateAvailable
+                      ? 'Retry download'
+                      : 'Check again'}
+              </Button>
             </div>
           ) : update.updateDownloaded ? (
             <Button
               className="rounded-lg border border-green-500 hover:bg-green-500 hover:text-white"
               onClick={handleInstallClick}
+              disabled={busy}
             >
               <p>Install Now</p>
               <IconArrowRight />
@@ -104,7 +148,7 @@ const UpdateOverlay: React.FC = () => {
             <Button
               className={`rounded-lg gap-2 border border-green-500 ${progress == undefined && 'hover:bg-green-500 hover:text-white'}`}
               onClick={handleDownloadClick}
-              disabled={progress !== undefined}
+              disabled={busy || progress !== undefined}
             >
               <p className={progress != undefined ? 'text-gray-500' : ''}>Download Now</p>
               {progress !== undefined ? <IconLoading /> : <IconArrowRight />}
@@ -113,6 +157,7 @@ const UpdateOverlay: React.FC = () => {
             <Button
               className="rounded-lg border border-green-500 hover:bg-green-500 hover:text-white"
               onClick={handleCheckClick}
+              disabled={busy}
             >
               <p>Check for Updates</p>
               <IconArrowRight />

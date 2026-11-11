@@ -6,8 +6,23 @@ import Logger from '@server/utils/logger'
 import { LOGGING_LEVELS } from '@deskthing/types'
 import { handleError } from '@server/utils/errorHandler'
 import { app } from 'electron'
-import { satisfies } from 'semver'
+import { lt, valid } from 'semver'
 import { getServiceConfig } from '@server/config/serviceConfig'
+
+type ReleaseNotes = string | { version: string; note: string | null }[] | null | undefined
+
+const normalizeReleaseNotes = (notes: ReleaseNotes): string | undefined => {
+  if (!notes) return undefined
+  if (typeof notes === 'string') return notes
+  return notes
+    .map((entry) => entry.note)
+    .filter((note): note is string => Boolean(note))
+    .join('\n')
+}
+
+// Shown in the update panel, so prefer the plain message over a stack trace.
+const describeError = (error: unknown): string =>
+  error instanceof Error && error.message ? error.message : handleError(error)
 
 export class UpdateStore
   extends EventEmitter<UpdateStoreEvents>
@@ -18,6 +33,7 @@ export class UpdateStore
   private _updateProgress: UpdateProgressType | null = null
   private _autoUpdater: AppUpdater | null = null
   private _checkInProgress: Promise<string> | null = null
+  private _downloadInProgress: Promise<void> | null = null
 
   get initialized(): boolean {
     return this._initialized
@@ -97,7 +113,7 @@ export class UpdateStore
         updateAvailable: true,
         updateDownloaded: true,
         version: info.version,
-        releaseNotes: info.releaseNotes as string,
+        releaseNotes: normalizeReleaseNotes(info.releaseNotes),
         releaseName: info.releaseName,
         releaseDate: info.releaseDate
       }
@@ -105,14 +121,7 @@ export class UpdateStore
     })
 
     this._autoUpdater.on('error', (error) => {
-      const errorStatus: UpdateInfoType = {
-        updateAvailable: false,
-        updateDownloaded: false,
-        failed: true,
-        error: error.message
-      }
-      this.setUpdateStatus(errorStatus)
-      this.emit('update-error', error.message)
+      this.reportFailure(error.message)
     })
 
     this._initialized = true
@@ -142,12 +151,23 @@ export class UpdateStore
 
     try {
       const updateCheck = await this._autoUpdater.checkForUpdates()
-      if (updateCheck && satisfies(appVersion, `<${updateCheck.updateInfo.version}`)) {
+      const latestVersion = updateCheck?.updateInfo.version
+      // `lt` rather than a range check: ranges exclude prereleases, which would
+      // stop a prerelease build from ever being offered its stable release.
+      if (
+        updateCheck &&
+        valid(latestVersion) &&
+        valid(appVersion) &&
+        lt(appVersion, latestVersion!)
+      ) {
         const updateInfo: UpdateInfoType = {
           updateAvailable: true,
-          updateDownloaded: false,
+          // A repeated check must not discard an update that is already downloaded.
+          updateDownloaded:
+            this._updateStatus?.updateDownloaded === true &&
+            this._updateStatus.version === latestVersion,
           version: updateCheck.updateInfo.version,
-          releaseNotes: updateCheck.updateInfo.releaseNotes as string,
+          releaseNotes: normalizeReleaseNotes(updateCheck.updateInfo.releaseNotes),
           releaseName: updateCheck.updateInfo.releaseName,
           releaseDate: updateCheck.updateInfo.releaseDate
         }
@@ -162,20 +182,21 @@ export class UpdateStore
         return 'No update available'
       }
     } catch (error) {
-      const errorMessage = handleError(error)
-      const errorStatus: UpdateInfoType = {
-        updateAvailable: false,
-        updateDownloaded: false,
-        failed: true,
-        error: errorMessage
-      }
-      this.setUpdateStatus(errorStatus)
-      this.emit('update-error', errorMessage)
-      return errorMessage
+      return this.reportFailure(describeError(error))
     }
   }
 
   startDownload = async (): Promise<void> => {
+    if (this._downloadInProgress) return this._downloadInProgress
+    this._downloadInProgress = this.performDownload()
+    try {
+      await this._downloadInProgress
+    } finally {
+      this._downloadInProgress = null
+    }
+  }
+
+  private performDownload = async (): Promise<void> => {
     await this.initialize()
     if (!this._autoUpdater) return
 
@@ -185,22 +206,36 @@ export class UpdateStore
       }
 
       if (!this._updateStatus?.updateAvailable) return
+      if (this._updateStatus.updateDownloaded) return
+      this._updateProgress = null
+      this.setUpdateStatus({ ...this._updateStatus, failed: false, error: undefined })
       await this._autoUpdater.downloadUpdate()
     } catch (error) {
-      const errorMessage = handleError(error)
-      const errorStatus: UpdateInfoType = {
-        updateAvailable: true,
-        updateDownloaded: false,
-        failed: true,
-        error: errorMessage
-      }
-      this.setUpdateStatus(errorStatus)
-      this.emit('update-error', errorMessage)
+      this.reportFailure(describeError(error))
     }
   }
 
+  /**
+   * Marks the current update as failed while keeping the release details and
+   * download state, so the UI can still describe the release and offer a retry.
+   */
+  private reportFailure = (message: string): string => {
+    // electron-updater reports a failed download through both its `error` event
+    // and the rejected promise; only surface it once.
+    if (this._updateStatus?.failed && this._updateStatus.error === message) return message
+    this.setUpdateStatus({
+      updateAvailable: false,
+      updateDownloaded: false,
+      ...this._updateStatus,
+      failed: true,
+      error: message
+    })
+    this.emit('update-error', message)
+    return message
+  }
+
   quitAndInstall = (): void => {
-    if (!this._autoUpdater) return
+    if (!this._autoUpdater || !this._updateStatus?.updateDownloaded) return
     this._autoUpdater.quitAndInstall()
   }
 
