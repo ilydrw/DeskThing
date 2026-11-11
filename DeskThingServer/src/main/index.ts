@@ -16,6 +16,8 @@
  * Main entry point for the Electron application.
  * Delegates responsibilities to specialized modules.
  */
+// Must stay first: selects this distribution's profile before anything reads it
+import './system/configureIdentity'
 import { app } from 'electron'
 import { setupSingleInstance } from './system/singleInstance'
 import { initializeAppLifecycle } from './lifecycle/appLifecycle'

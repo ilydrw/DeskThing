@@ -4,10 +4,11 @@
 import { updateLoadingStatus } from '@server/windows/loadingWindow'
 import { AppData } from '@shared/types'
 import { app } from 'electron'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import semverSatisfies from 'semver/functions/satisfies.js'
 import { verifyAppInstanceStructure } from '../apps/appValidator'
+import { PROFILE_DATA_ENTRIES } from './legacyImport'
 
 export const migrateDeskThing = async (prevVersion: string | undefined): Promise<void> => {
   const currentVersion = app.getVersion()
@@ -15,8 +16,8 @@ export const migrateDeskThing = async (prevVersion: string | undefined): Promise
 
   try {
     if (!prevVersion) {
-      // Ensure the data is wiped (no version found)
-      await wipeData()
+      // No readable version: start clean, but keep the old data recoverable
+      await setAsideUnversionedData()
     } else if (semverSatisfies(prevVersion, '<0.11.0')) {
       // migrate from before v0.11.0
       await preEleven()
@@ -30,18 +31,38 @@ export const migrateDeskThing = async (prevVersion: string | undefined): Promise
 }
 
 /**
- * Wipes the entire folder
+ * Moves data of an unknown version out of the way instead of deleting it.
+ *
+ * A missing or unreadable settings.json used to wipe the whole profile, which
+ * destroyed installed apps and mappings whenever that one file was damaged.
+ * The data is now kept under recovery/ so it can be restored by hand.
  */
-const wipeData = async (): Promise<void> => {
-  updateLoadingStatus('Wiping data...')
-  const path = app.getPath('userData')
-  try {
-    await rm(path, { recursive: true, force: true })
-  } catch (error) {
-    console.error(
-      `An error was encountered while wiping data. This could be due to it being a fresh install`,
-      error
-    )
+export const setAsideUnversionedData = async (now: Date = new Date()): Promise<void> => {
+  const profilePath = app.getPath('userData')
+  const present: string[] = []
+  for (const entry of PROFILE_DATA_ENTRIES) {
+    try {
+      await stat(join(profilePath, entry))
+      present.push(entry)
+    } catch {
+      // not present
+    }
+  }
+  if (present.length === 0) return // fresh install
+
+  updateLoadingStatus('Setting aside data from an unknown version...')
+  const recoveryPath = join(
+    profilePath,
+    'recovery',
+    `unversioned-${now.toISOString().replace(/[:.]/g, '-')}`
+  )
+  await mkdir(recoveryPath, { recursive: true })
+  for (const entry of present) {
+    try {
+      await rename(join(profilePath, entry), join(recoveryPath, entry))
+    } catch (error) {
+      console.error(`Could not set aside ${entry}`, error)
+    }
   }
 }
 

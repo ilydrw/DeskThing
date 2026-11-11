@@ -1,9 +1,9 @@
 {
-  "name": "deskthing",
+  "name": "deskthing-community",
   "version": "0.11.17",
-  "description": "A DeskThing server UI to interface with the DeskThing car thing app",
+  "description": "DeskThing Community: an independent community continuation of DeskThing for the Car Thing",
   "main": "./out/main/index.js",
-  "author": "Riprod and DeskThing contributors",
+  "author": "DeskThing Community contributors; originally created by Riprod",
   "type": "module",
   "scripts": {
     "format": "prettier --write .",
@@ -91,8 +91,8 @@
     "vitest": "^4.1.11"
   },
   "build": {
-    "appId": "com.deskthing.app",
-    "productName": "DeskThing",
+    "appId": "io.github.ilydrw.deskthing-community",
+    "productName": "DeskThing Community",
     "directories": {
       "buildResources": "build"
     },
@@ -122,7 +122,7 @@
       }
     ],
     "win": {
-      "executableName": "DeskThing",
+      "executableName": "DeskThingCommunity",
       "artifactName": "${name}-${os}-${version}-setup.${ext}",
       "extraFiles": [
         {

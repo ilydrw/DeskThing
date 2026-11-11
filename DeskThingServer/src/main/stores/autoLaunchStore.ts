@@ -3,6 +3,7 @@ import { app } from 'electron'
 import AutoLaunch from 'auto-launch'
 import Logger from '../utils/logger'
 import { SettingsStoreClass } from '@shared/stores/settingsStore'
+import { PRODUCT_NAME } from '@server/system/identity'
 
 export class AutoLaunchStore implements AutoLaunchStoreClass {
   private autoLauncher: AutoLaunch
@@ -14,7 +15,7 @@ export class AutoLaunchStore implements AutoLaunchStoreClass {
 
   constructor(private settingStore: SettingsStoreClass) {
     this.autoLauncher = new AutoLaunch({
-      name: 'DeskThing',
+      name: PRODUCT_NAME,
       path: app.getPath('exe')
     })
   }

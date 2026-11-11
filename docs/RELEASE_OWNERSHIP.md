@@ -9,10 +9,10 @@ platform signing, ownership, compatibility, and migration gates below.
 
 - A GitHub organization or repository used for source, issues, releases, and
   update metadata
-- A project name and unique desktop application identifier. The current
-  `com.deskthing.app` identifier is retained only for compatibility during
-  development and must not be used by an independent public fork without an
-  explicit ownership decision.
+- A project name and unique desktop application identifier. The fork uses
+  `DeskThing Community` and `io.github.ilydrw.deskthing-community`; the
+  original's `com.deskthing.app` is no longer used. The constants live in
+  `DeskThingServer/src/main/system/identity.ts` and must match `package.json`.
 - A Windows code-signing certificate controlled by the project
 - An Apple Developer ID certificate, Apple team, and notarization credentials
 - App and client catalog repositories

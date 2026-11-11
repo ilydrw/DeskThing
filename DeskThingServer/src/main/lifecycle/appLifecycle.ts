@@ -1,6 +1,7 @@
 /**
  * Manages application lifecycle events
  */
+import { APP_ID } from '@server/system/identity'
 import { app, BrowserWindow, NativeImage, nativeImage, Notification } from 'electron'
 import { setupProtocolHandler } from '../system/protocol'
 import { setupTray } from '../system/tray'
@@ -56,7 +57,7 @@ export async function initializeAppLifecycle(): Promise<void> {
   setupTray()
 
   // Set app ID for Windows
-  app.setAppUserModelId('com.deskthing')
+  app.setAppUserModelId(APP_ID)
 
   // Optimize window shortcuts
   app.on('browser-window-created', async (_, window) => {
