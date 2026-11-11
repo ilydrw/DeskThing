@@ -3,7 +3,12 @@ import fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deleteFile, readFromFile, updateFile, writeToFile } from '@server/services/files/fileService'
+import {
+  deleteFile,
+  readFromFile,
+  updateFile,
+  writeToFile
+} from '@server/services/files/fileService'
 
 const mocks = vi.hoisted(() => ({
   userDataPath: '',
@@ -49,7 +54,9 @@ describe('recoverable persistence', () => {
     async (content) => {
       await writeFile(join(mocks.userDataPath, 'state.json'), content)
       await expect(readFromFile('state.json')).resolves.toBeUndefined()
-      const backups = (await readdir(mocks.userDataPath)).filter((name) => name.includes('.corrupt-'))
+      const backups = (await readdir(mocks.userDataPath)).filter((name) =>
+        name.includes('.corrupt-')
+      )
       expect(backups).toHaveLength(1)
       expect(await readFile(join(mocks.userDataPath, backups[0]), 'utf8')).toBe(content)
       await writeToFile({ recovered: true }, 'state.json')
@@ -64,13 +71,21 @@ describe('recoverable persistence', () => {
 
   it('preserves valid JSON with an invalid schema', async () => {
     await writeToFile({ devices: 'wrong type' }, 'state.json')
-    expect(await readFromFile('state.json', () => { throw new Error('Invalid devices') })).toBeUndefined()
-    expect((await readdir(mocks.userDataPath)).some((name) => name.includes('.corrupt-'))).toBe(true)
+    expect(
+      await readFromFile('state.json', () => {
+        throw new Error('Invalid devices')
+      })
+    ).toBeUndefined()
+    expect((await readdir(mocks.userDataPath)).some((name) => name.includes('.corrupt-'))).toBe(
+      true
+    )
   })
 
   it('keeps the committed file when replacement fails and continues the queue', async () => {
     await writeToFile({ value: 1 }, 'state.json')
-    const rename = vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EPERM' }))
+    const rename = vi
+      .spyOn(fs.promises, 'rename')
+      .mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EPERM' }))
     await expect(writeToFile({ value: 2 }, 'state.json')).rejects.toThrow('Cannot replace')
     expect(await readFromFile('state.json')).toEqual({ value: 1 })
     expect(await readdir(mocks.userDataPath)).toEqual(['state.json'])
@@ -81,7 +96,9 @@ describe('recoverable persistence', () => {
 
   it('never overwrites state after a permission failure until a successful read', async () => {
     await writeToFile({ value: 1 }, 'state.json')
-    const read = vi.spyOn(fs.promises, 'readFile').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }))
+    const read = vi
+      .spyOn(fs.promises, 'readFile')
+      .mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }))
     await expect(readFromFile('state.json')).rejects.toThrow('Cannot read')
     await expect(writeToFile({ value: 2 }, 'state.json')).rejects.toThrow('Refusing to overwrite')
     read.mockRestore()
@@ -98,10 +115,13 @@ describe('recoverable persistence', () => {
   })
 
   it('serializes transactions across equivalent paths without losing updates', async () => {
-    await Promise.all(Array.from({ length: 30 }, (_, index) => updateFile<{ count: number }>(
-      index % 2 ? './state.json' : 'state.json',
-      (current) => ({ count: (current?.count ?? 0) + 1 })
-    )))
+    await Promise.all(
+      Array.from({ length: 30 }, (_, index) =>
+        updateFile<{ count: number }>(index % 2 ? './state.json' : 'state.json', (current) => ({
+          count: (current?.count ?? 0) + 1
+        }))
+      )
+    )
     expect(await readFromFile('state.json')).toEqual({ count: 30 })
   })
 

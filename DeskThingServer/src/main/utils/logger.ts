@@ -356,7 +356,8 @@ class Logger {
   async notifyListeners(data: Log): Promise<void> {
     try {
       this.logs.push(data)
-      if (this.logs.length > MAX_PERSISTED_LOGS) this.logs.splice(0, this.logs.length - MAX_PERSISTED_LOGS)
+      if (this.logs.length > MAX_PERSISTED_LOGS)
+        this.logs.splice(0, this.logs.length - MAX_PERSISTED_LOGS)
       await Promise.all(this.listeners.map((listener) => listener(data)))
     } catch (error) {
       console.error('[Logger]: Failed to notify some listeners', error)

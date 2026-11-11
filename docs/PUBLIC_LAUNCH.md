@@ -3,7 +3,8 @@
 Working name: **DeskThing Community**. Position it as **an independent community
 continuation of DeskThing, originally created by Riprod**. This is a working
 identity, not a claim to the original project's accounts, brand, or endorsement.
-Confirm naming availability before reserving accounts or changing installer IDs.
+The installer identity now uses this name (decided 2026-11-11); confirm naming
+availability before reserving accounts or publishing an installer.
 
 ## Recommended launch sequence
 
@@ -25,17 +26,17 @@ are sufficient for the initial project home.
 
 ## Current release blockers
 
-Inspection date: 2026-09-24. These are local findings, not a full security audit.
+Inspection date: 2026-11-11. These are local findings, not a full security audit.
 
 | Area | Evidence in this checkout | Required outcome |
 | --- | --- | --- |
-| Repository ownership | Only an `upstream` remote exists | Create the owned fork; configure its `origin`, maintainers, protected branch checks, and private vulnerability reporting |
-| Application identity | Package name `deskthing`, app ID `com.deskthing.app`, Windows model ID `com.deskthing`, and `deskthing:` protocol | Decide coexistence versus migration before changing all identity consumers; test shortcuts, protocol handlers, autostart, and updates |
-| User data | Existing profiles belong to legacy DeskThing | Back up data; use an explicit, versioned import into a separate fork profile; verify rollback without overwriting the original |
+| Repository ownership | `origin` is configured as `https://github.com/ilydrw/DeskThing.git`; upstream is retained | Verify maintainers, protected branch checks, and private vulnerability reporting on the remote repository |
+| Application identity | Decided 2026-11-11: replace the original through a separate identity. Package name `deskthing-community`, product name `DeskThing Community`, app ID and Windows model ID `io.github.ilydrw.deskthing-community`, executable `DeskThingCommunity`. The `deskthing:` protocol is kept for app compatibility | Test shortcuts, protocol handler takeover, autostart, and updates on an installed build; decide how to tell users to remove the original |
+| User data | The fork uses its own `deskthing-community` profile and runs a one-time, copy-only, versioned import of the original profile on first launch (see [MIGRATION.md](MIGRATION.md)). Covered by automated tests only | Run the import against a real profile on an installed build; verify apps, mappings, settings, device names, and credentials; verify rollback |
 | Distribution | Current workflow only uploads unsigned unpacked builds | Configure owned signing identities and a protected publishing workflow with artifact checksums and signature verification |
 | Services | Validated bundled defaults are supported; `distribution.json` is intentionally empty | Assign owned catalogs and update hosting, populate public defaults, and verify a clean installation |
 | Hardware/client | Desktop build is only one part of the product | Record compatible client, firmware, SDK/types, and app versions; preserve recovery downloads with verified hashes and redistribution notices |
-| Dependencies | Runtime and full audits are clean after the Vitest 4.1.11 update | Re-run audit and the full verification suite for every release |
+| Dependencies | Runtime audit is clean as of 2026-11-11; 13 moderate findings remain in development tooling | Re-run audit and the full verification suite for every release |
 | Validation | Prior documentation describes older successful checks | Record fresh CI, packaging, device, and migration evidence for the exact release commit |
 
 Do not change the public application ID in isolation: it affects installer/update
@@ -111,16 +112,28 @@ for each scenario. Use disposable profiles and backups for migration tests.
 
 ## Verification commands
 
-Local evidence from this pass (Windows, 2026-09-24):
+Local evidence from this pass (Windows, 2026-11-11):
 
-- `npm run verify`: passed both type checks, lint, and 212 tests across 35 files.
-  Lint still reports 439 existing formatting warnings; it reports zero errors.
-- `npm audit --omit=dev` and full `npm audit`: zero vulnerabilities.
+- Both type checks and lint passed. `npm run test:run` passed all 246 tests
+  across 40 files. Lint reports zero warnings and zero errors.
+- `npm audit --omit=dev`: zero vulnerabilities. Full `npm audit`: 13 moderate
+  findings in development tooling only (see `SECURITY.md`).
 - `npm run build:unpack`: passed the production bundle and Windows x64 unpacked
   package build. Packaging still reports duplicate dependency references.
 - Configuration tests verify that bundled catalogs reach release metadata,
   runtime overrides can disable defaults, and unsafe configuration is rejected.
-- Not performed: fresh `npm ci`, signed installer verification, macOS/Linux
+- Update tests cover awaited renderer requests, IPC failure reporting, coalesced
+  downloads, retry after failure, and preventing installation before download.
+- The Windows archive contains no `.env*` files. Authenticode inspection reports
+  `NotSigned`; packager signing log messages alone do not prove a signed release.
+- Update failures now keep the panel visible with recovery actions. The progress
+  listener cleans up only its own subscription; refresh/download controls wait
+  for their requests rather than returning early or adding artificial delays.
+- Import tests cover copying user data, skipping caches, leaving the original
+  byte-identical, running once, refusing to overwrite an existing profile, and
+  rolling back a failed import. Data of an unknown version is moved to
+  `recovery/` instead of being deleted.
+- Not performed: a real first launch of the renamed build, fresh `npm ci`, signed installer verification, macOS/Linux
   packaging, live UI inspection, migration, real updates, or physical-device
   testing. The built package is not a verified public release.
 

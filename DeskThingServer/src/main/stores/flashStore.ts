@@ -265,7 +265,9 @@ export class FlashStore
   // Wraps the post message to type it
   private async sendToFlash(message: FlashServer): Promise<void> {
     if (!this.flashProcess) {
-      this.workerInitialization ??= this.setupWorker().finally(() => { this.workerInitialization = undefined })
+      this.workerInitialization ??= this.setupWorker().finally(() => {
+        this.workerInitialization = undefined
+      })
       await this.workerInitialization
     }
 
@@ -444,7 +446,9 @@ export class FlashStore
     }
   }
 
-  private isFlashCancelled(): boolean { return this._flashState.state === 'cancelled' }
+  private isFlashCancelled(): boolean {
+    return this._flashState.state === 'cancelled'
+  }
 
   async getFlashStatus(): Promise<FlashingState | null> {
     return this._flashState
@@ -462,19 +466,28 @@ export class FlashStore
         this.off('flash-stopped', stopped)
         resolve(steps)
       }
-      const onSteps = (steps: number): void => finish(Number.isInteger(steps) && steps > 0 ? steps : null)
+      const onSteps = (steps: number): void =>
+        finish(Number.isInteger(steps) && steps > 0 ? steps : null)
       const stopped = (): void => finish(null)
       const timeout = setTimeout(() => {
-        logger.warn('Flash worker did not provide its step count within 10 seconds', { source: 'flashStore', function: 'getFlashSteps' })
+        logger.warn('Flash worker did not provide its step count within 10 seconds', {
+          source: 'flashStore',
+          function: 'getFlashSteps'
+        })
         finish(null)
       }, 10000)
       this.once('total-steps', onSteps)
       this.once('flash-stopped', stopped)
       void this.sendToFlash({ type: 'request', request: FLASH_REQUEST.STEPS }).catch((error) => {
-        logger.error('Unable to request flash steps', { source: 'flashStore', error: error as Error })
+        logger.error('Unable to request flash steps', {
+          source: 'flashStore',
+          error: error as Error
+        })
         finish(null)
       })
-    }).finally(() => { this.stepRequest = undefined })
+    }).finally(() => {
+      this.stepRequest = undefined
+    })
     return this.stepRequest
   }
 

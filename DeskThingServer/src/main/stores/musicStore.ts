@@ -34,7 +34,9 @@ export class MusicStore implements CacheableStore, MusicStoreClass {
     return this.musicService.clearCache()
   }
 
-  dispose(): void { this.musicService.dispose() }
+  dispose(): void {
+    this.musicService.dispose()
+  }
 
   async saveToFile(): Promise<void> {
     return this.musicService.saveToFile()

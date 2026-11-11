@@ -46,7 +46,9 @@ export class AuthStore extends EventEmitter<authStoreEventTypes> implements Auth
       await this.initializeServer()
       this.initializeListeners()
       this._initialized = true
-    })().finally(() => { this.initialization = undefined })
+    })().finally(() => {
+      this.initialization = undefined
+    })
     await this.initialization
   }
 
@@ -244,11 +246,13 @@ export class AuthStore extends EventEmitter<authStoreEventTypes> implements Auth
       })
       return
     }
-    const change = this.portChange.catch(() => undefined).then(async () => {
-      if (port === this.callbackPort && this.server?.listening) return
-      await this.startServer(port)
-      this.callbackPort = port
-    })
+    const change = this.portChange
+      .catch(() => undefined)
+      .then(async () => {
+        if (port === this.callbackPort && this.server?.listening) return
+        await this.startServer(port)
+        this.callbackPort = port
+      })
     this.portChange = change
     await change
   }

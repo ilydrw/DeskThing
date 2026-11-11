@@ -1,10 +1,19 @@
 import { Settings, CacheableStore } from '@shared/types'
-import { SettingsListener, SettingsStoreClass, SettingsStoreListener } from '@shared/stores/settingsStore'
+import {
+  SettingsListener,
+  SettingsStoreClass,
+  SettingsStoreListener
+} from '@shared/stores/settingsStore'
 import { readFromFile, writeToFile } from '../services/files/fileService'
 import Logger from '@server/utils/logger'
 import { defaultSettings } from '@server/static/defaultSettings'
 import { app } from 'electron/main'
-import { assertRecord, isRecord, isSettingValue, normalizeSettings } from '@shared/validation/settings'
+import {
+  assertRecord,
+  isRecord,
+  isSettingValue,
+  normalizeSettings
+} from '@shared/validation/settings'
 
 const STATS_CONSENT_VERSION = 1
 
@@ -16,14 +25,20 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
   private initialization?: Promise<void>
   private pendingSave: Promise<void> = Promise.resolve()
 
-  public get initialized(): boolean { return this._initialized }
+  public get initialized(): boolean {
+    return this._initialized
+  }
 
   async initialize(): Promise<void> {
     if (this._initialized) return
-    this.initialization ??= this.loadSettings().then((settings) => {
-      this.settings = settings
-      this._initialized = true
-    }).finally(() => { this.initialization = undefined })
+    this.initialization ??= this.loadSettings()
+      .then((settings) => {
+        this.settings = settings
+        this._initialized = true
+      })
+      .finally(() => {
+        this.initialization = undefined
+      })
     await this.initialization
   }
 
@@ -31,20 +46,26 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
     // Settings stay resident because connection and logging services depend on them.
   }
 
-  saveToFile = async (): Promise<void> => { await this.saveSettings() }
+  saveToFile = async (): Promise<void> => {
+    await this.saveSettings()
+  }
 
   private async notifyListeners(): Promise<void> {
     if (!this.settings) return
     const snapshot = structuredClone(this.settings)
-    await Promise.all(this.globalListeners.map(async (listener) => {
-      try {
-        await listener(structuredClone(snapshot))
-      } catch (error) {
-        Logger.error('Settings listener failed', {
-          source: 'settingsStore', function: 'notifyListeners', error: error as Error
-        })
-      }
-    }))
+    await Promise.all(
+      this.globalListeners.map(async (listener) => {
+        try {
+          await listener(structuredClone(snapshot))
+        } catch (error) {
+          Logger.error('Settings listener failed', {
+            source: 'settingsStore',
+            function: 'notifyListeners',
+            error: error as Error
+          })
+        }
+      })
+    )
   }
 
   public async saveSettings(settings?: Settings): Promise<void> {
@@ -70,9 +91,14 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
     try {
       stored = await readFromFile<unknown>(this.settingsFilePath, assertRecord)
     } catch (error) {
-      Logger.warn('Unable to read settings; using defaults in memory without overwriting the file', {
-        source: 'settingsStore', function: 'loadSettings', error: error as Error
-      })
+      Logger.warn(
+        'Unable to read settings; using defaults in memory without overwriting the file',
+        {
+          source: 'settingsStore',
+          function: 'loadSettings',
+          error: error as Error
+        }
+      )
       return structuredClone(defaultSettings)
     }
 
@@ -87,7 +113,9 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
         await writeToFile(data, this.settingsFilePath)
       } catch (error) {
         Logger.warn('Unable to persist migrated settings; retaining usable settings in memory', {
-          source: 'settingsStore', function: 'loadSettings', error: error as Error
+          source: 'settingsStore',
+          function: 'loadSettings',
+          error: error as Error
         })
       }
     }
@@ -99,13 +127,17 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
     return structuredClone(this.settings ?? defaultSettings)
   }
 
-  public getSetting = async <K extends keyof Settings>(key: K): Promise<Settings[K] | undefined> => {
+  public getSetting = async <K extends keyof Settings>(
+    key: K
+  ): Promise<Settings[K] | undefined> => {
     return (await this.getSettings())[key]
   }
 
   public addSettingsListener(listener: SettingsListener): () => void {
     this.globalListeners.push(listener)
-    return () => { this.globalListeners = this.globalListeners.filter((l) => l !== listener) }
+    return () => {
+      this.globalListeners = this.globalListeners.filter((l) => l !== listener)
+    }
   }
 
   public on<K extends keyof Settings>(key: K, listener: SettingsStoreListener<K>): () => void {
@@ -127,9 +159,11 @@ export class SettingsStore implements CacheableStore, SettingsStoreClass {
   }
 
   public async setFlag(flag: string, value: boolean): Promise<void> {
-    if (typeof flag !== 'string' || !flag || typeof value !== 'boolean') throw new Error('Invalid flag')
+    if (typeof flag !== 'string' || !flag || typeof value !== 'boolean')
+      throw new Error('Invalid flag')
     await this.updateSettings((settings) => ({
-      ...settings, flag_misc: { ...settings.flag_misc, [flag]: value }
+      ...settings,
+      flag_misc: { ...settings.flag_misc, [flag]: value }
     }))
   }
 

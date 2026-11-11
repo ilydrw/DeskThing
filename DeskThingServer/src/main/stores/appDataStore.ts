@@ -279,23 +279,27 @@ export class AppDataStore
       delete this.functionTimeouts[name]
       void this.persistData(name, notifyApp).catch((error) => {
         Logger.error(`Unable to save data for ${name}; unsaved changes retained in memory`, {
-          source: 'AppDataStore', function: 'saveData', error: error as Error
+          source: 'AppDataStore',
+          function: 'saveData',
+          error: error as Error
         })
       })
     }, 700)
   }
 
   private async persistData(name: string, notifyApp = false): Promise<void> {
-    const saved = (this.activeSaves.get(name) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const data = this.appDataCache[name]
-      if (!data || Object.keys(data).length <= 1) return
-      const version = this.saveVersions.get(name)
-      const snapshot = structuredClone(data)
-      await setData(name, snapshot)
-      if (version !== this.saveVersions.get(name)) return
-      await this.notifyAppFields(name, notifyApp)
-      if (version === this.saveVersions.get(name)) delete this.appDataCache[name]
-    })
+    const saved = (this.activeSaves.get(name) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(async () => {
+        const data = this.appDataCache[name]
+        if (!data || Object.keys(data).length <= 1) return
+        const version = this.saveVersions.get(name)
+        const snapshot = structuredClone(data)
+        await setData(name, snapshot)
+        if (version !== this.saveVersions.get(name)) return
+        await this.notifyAppFields(name, notifyApp)
+        if (version === this.saveVersions.get(name)) delete this.appDataCache[name]
+      })
     this.activeSaves.set(name, saved)
     try {
       await saved
@@ -310,9 +314,15 @@ export class AppDataStore
   saveToFile = async (): Promise<void> => {
     for (const timeout of Object.values(this.functionTimeouts)) clearTimeout(timeout)
     this.functionTimeouts = {}
-    const results = await Promise.allSettled(Object.keys(this.appDataCache).map((name) => this.persistData(name)))
+    const results = await Promise.allSettled(
+      Object.keys(this.appDataCache).map((name) => this.persistData(name))
+    )
     const failures = results.filter((result) => result.status === 'rejected')
-    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Unable to flush app data')
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        'Unable to flush app data'
+      )
     await this.notifyGlobal()
   }
 
@@ -426,7 +436,8 @@ export class AppDataStore
     }
 
     const merged: AppDataInterface = {
-      ...data, ...pending,
+      ...data,
+      ...pending,
       version: pending?.version ?? data?.version ?? '0.0.0',
       data: { ...data?.data, ...pending?.data },
       settings: { ...data?.settings, ...pending?.settings },

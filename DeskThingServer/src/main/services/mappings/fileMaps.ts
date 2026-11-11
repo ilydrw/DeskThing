@@ -3,7 +3,11 @@ import { MappingStructure, MappingFileStructure } from '@shared/types'
 import { defaultData } from '@server/static/defaultMapping'
 import Logger from '@server/utils/logger'
 import { readFromFile, writeToFile } from '@server/services/files/fileService'
-import { isValidButtonMapping, isValidFileStructure, isValidMappingStructure } from './mapsValidation'
+import {
+  isValidButtonMapping,
+  isValidFileStructure,
+  isValidMappingStructure
+} from './mapsValidation'
 import path from 'node:path'
 
 const MAPPINGS_FILE = path.join('mappings', 'mappings.json')
@@ -17,12 +21,15 @@ export const loadMappings = async (): Promise<MappingStructure> => {
   const data = await readFromFile<MappingFileStructure>(MAPPINGS_FILE, validateMappingFile)
   if (!data) return structuredClone(defaultData)
 
-  const entries = await Promise.all(Object.values(data.profiles).map(async (profile) => {
-    const mapping = await readFromFile<ButtonMapping>(
-      path.join('mappings', profile.id + '.json'), isValidButtonMapping
-    )
-    return mapping && mapping.id === profile.id ? [profile.id, mapping] as const : undefined
-  }))
+  const entries = await Promise.all(
+    Object.values(data.profiles).map(async (profile) => {
+      const mapping = await readFromFile<ButtonMapping>(
+        path.join('mappings', profile.id + '.json'),
+        isValidButtonMapping
+      )
+      return mapping && mapping.id === profile.id ? ([profile.id, mapping] as const) : undefined
+    })
+  )
   const profiles = {
     default: structuredClone(defaultData.profiles.default),
     ...Object.fromEntries(entries.filter((entry) => entry !== undefined))
@@ -47,9 +54,14 @@ export const saveMappings = async (mapping: MappingStructure): Promise<void> => 
   const snapshot = structuredClone(mapping)
   await isValidMappingStructure(snapshot)
   // Publish the index only after every referenced profile has been saved.
-  const profiles = Object.fromEntries(await Promise.all(
-    Object.entries(snapshot.profiles).map(async ([key, profile]) => [key, await saveProfile(profile)])
-  ))
+  const profiles = Object.fromEntries(
+    await Promise.all(
+      Object.entries(snapshot.profiles).map(async ([key, profile]) => [
+        key,
+        await saveProfile(profile)
+      ])
+    )
+  )
   await writeToFile({ ...snapshot, profiles }, MAPPINGS_FILE)
 }
 
@@ -65,7 +77,8 @@ export const importProfile = async (
   const profile = await readFromFile<ButtonMapping>(filePath, isValidButtonMapping)
   if (!profile) {
     Logger.warn('Unable to import missing or invalid mapping profile ' + profileName, {
-      source: 'fileMaps', function: 'importProfile'
+      source: 'fileMaps',
+      function: 'importProfile'
     })
   }
   return profile

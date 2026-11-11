@@ -17,10 +17,15 @@ import { defaultMappingProfile } from '@server/static/defaultButtons'
 import { isRecord } from '@shared/validation/settings'
 
 const validateProfileFile = (value: unknown): void => {
-  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || typeof value.version !== 'string' ||
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    !value.id ||
+    typeof value.version !== 'string' ||
     typeof value.enabled !== 'boolean' ||
     (value.clientConfig !== undefined && !isRecord(value.clientConfig)) ||
-    (value.mapping !== undefined && (!isRecord(value.mapping) || !isRecord(value.mapping.mapping)))) {
+    (value.mapping !== undefined && (!isRecord(value.mapping) || !isRecord(value.mapping.mapping)))
+  ) {
     throw new Error('Invalid profile data')
   }
 }

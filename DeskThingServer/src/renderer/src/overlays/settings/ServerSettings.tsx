@@ -50,13 +50,14 @@ const ServerSettings: React.FC = () => {
   }
 
   const checkForUpdate = async (): Promise<void> => {
+    if (downloadLoading) return
     setDownloadLoading(true)
     setUpdateStatus('')
-    const updateStatus = await checkForUpdateFn()
-    setTimeout(() => {
+    try {
+      setUpdateStatus(await checkForUpdateFn())
+    } finally {
       setDownloadLoading(false)
-      setUpdateStatus(updateStatus)
-    }, 1000)
+    }
   }
 
   return (

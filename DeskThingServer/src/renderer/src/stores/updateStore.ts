@@ -36,15 +36,41 @@ const useUpdateStore = create<UpdateStoreState>((set, get) => ({
   },
 
   checkForUpdates: async (): Promise<string> => {
-    return await window.electron.update.check()
+    try {
+      return await window.electron.update.check()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not check for updates.'
+      set({ update: { ...get().update, failed: true, error: message } })
+      return message
+    }
   },
 
   quitAndInstall: async (): Promise<void> => {
-    window.electron.update.install()
+    try {
+      await window.electron.update.install()
+    } catch (error) {
+      set({
+        update: {
+          ...get().update,
+          failed: true,
+          error: error instanceof Error ? error.message : 'Could not install the update.'
+        }
+      })
+    }
   },
 
   downloadUpdate: async (): Promise<void> => {
-    window.electron.update.download()
+    try {
+      await window.electron.update.download()
+    } catch (error) {
+      set({
+        update: {
+          ...get().update,
+          failed: true,
+          error: error instanceof Error ? error.message : 'Could not download the update.'
+        }
+      })
+    }
   }
 }))
 

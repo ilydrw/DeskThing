@@ -16,6 +16,8 @@
  * Main entry point for the Electron application.
  * Delegates responsibilities to specialized modules.
  */
+// Must stay first: selects this distribution's profile before anything reads it
+import './system/configureIdentity'
 import { app } from 'electron'
 import { setupSingleInstance } from './system/singleInstance'
 import { initializeAppLifecycle } from './lifecycle/appLifecycle'
@@ -30,23 +32,26 @@ if (!setupSingleInstance()) {
   app.quit()
 } else {
   // Application initialization
-  app.whenReady().then(async () => {
-    // Show loading window first
-    const loadingWindow = await buildLoadingWindow()
+  app
+    .whenReady()
+    .then(async () => {
+      // Show loading window first
+      const loadingWindow = await buildLoadingWindow()
 
-    loadingWindow.once('ready-to-show', async () => {
-      loadingWindow.show()
-      try {
-        await initializationCheck()
-        await initializeAppLifecycle()
-      } catch (error) {
-        console.error('Application startup failed', error)
-        const { updateLoadingStatus } = await import('./windows/loadingWindow')
-        await updateLoadingStatus('Startup failed. See the application log for details.')
-      }
+      loadingWindow.once('ready-to-show', async () => {
+        loadingWindow.show()
+        try {
+          await initializationCheck()
+          await initializeAppLifecycle()
+        } catch (error) {
+          console.error('Application startup failed', error)
+          const { updateLoadingStatus } = await import('./windows/loadingWindow')
+          await updateLoadingStatus('Startup failed. See the application log for details.')
+        }
+      })
     })
-  }).catch((error) => {
-    console.error('Unable to create the application window', error)
-    app.quit()
-  })
+    .catch((error) => {
+      console.error('Unable to create the application window', error)
+      app.quit()
+    })
 }

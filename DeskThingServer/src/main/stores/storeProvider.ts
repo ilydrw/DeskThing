@@ -165,17 +165,23 @@ export class StoreProvider {
 
     void this.initialize().catch((error) => {
       logger.error('Unable to initialize settings for logging', {
-        source: 'storeProvider', function: 'initialize', error: error as Error
+        source: 'storeProvider',
+        function: 'initialize',
+        error: error as Error
       })
     })
   }
 
   public async initialize(): Promise<void> {
     if (this.initialized) return
-    this.initialization ??= this.getStore('settingsStore').then(async (settingStore) => {
-      await logger.setupSettingsListener(settingStore)
-      this.initialized = true
-    }).finally(() => { this.initialization = undefined })
+    this.initialization ??= this.getStore('settingsStore')
+      .then(async (settingStore) => {
+        await logger.setupSettingsListener(settingStore)
+        this.initialized = true
+      })
+      .finally(() => {
+        this.initialization = undefined
+      })
     await this.initialization
   }
 
@@ -194,14 +200,18 @@ export class StoreProvider {
     if (!store) {
       let constructing = this.constructing.get(storeName)
       if (!constructing) {
-        constructing = this.storeInitializers[storeName]().then(async (created) => {
-        // Wire the back-reference only once the task store's dependencies exist.
-        if (storeName === 'taskStore') {
-          const appDataStore = await this.getStore('appDataStore', false)
-          await appDataStore.setupListeners(created as Stores['taskStore'])
-        }
-        this.storeInstances[storeName] = created
-        }).finally(() => { this.constructing.delete(storeName) })
+        constructing = this.storeInitializers[storeName]()
+          .then(async (created) => {
+            // Wire the back-reference only once the task store's dependencies exist.
+            if (storeName === 'taskStore') {
+              const appDataStore = await this.getStore('appDataStore', false)
+              await appDataStore.setupListeners(created as Stores['taskStore'])
+            }
+            this.storeInstances[storeName] = created
+          })
+          .finally(() => {
+            this.constructing.delete(storeName)
+          })
         this.constructing.set(storeName, constructing)
       }
       await constructing
@@ -213,9 +223,11 @@ export class StoreProvider {
       let initializing = this.initializing.get(storeName)
       if (!initializing && !store.initialized) {
         const instance = store
-        initializing = Promise.resolve().then(() => instance.initialize()).finally(() => {
-          this.initializing.delete(storeName)
-        })
+        initializing = Promise.resolve()
+          .then(() => instance.initialize())
+          .finally(() => {
+            this.initializing.delete(storeName)
+          })
         this.initializing.set(storeName, initializing)
       }
       if (initializing) await initializing
@@ -236,11 +248,17 @@ export class StoreProvider {
   }
 
   public async dispose(): Promise<void> {
-    const results = await Promise.allSettled(Object.values(this.storeInstances).map(async (store) => {
-      await store.dispose?.()
-    }))
+    const results = await Promise.allSettled(
+      Object.values(this.storeInstances).map(async (store) => {
+        await store.dispose?.()
+      })
+    )
     const failures = results.filter((result) => result.status === 'rejected')
-    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Service cleanup failed')
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        'Service cleanup failed'
+      )
   }
 
   public async saveAllToFile(): Promise<void> {

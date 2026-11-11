@@ -505,7 +505,7 @@ export class AppProcessStore
 
       try {
         // First try to gracefully terminate
-          await this.processes[appName].process.terminate()
+        await this.processes[appName].process.terminate()
       } catch (terminateError) {
         Logger.error(`Error during termination of process ${appName}`, {
           source: 'AppProcessStore',

@@ -58,7 +58,7 @@ const OverlayWrapper: React.FC<React.PropsWithChildren> = ({
           <LinkRequestOverlay />
         </Suspense>
       )}
-      {(update.updateAvailable || update.updateDownloaded) && (
+      {(update.updateAvailable || update.updateDownloaded || update.failed) && (
         <Suspense fallback={null}>
           <UpdateOverlay />
         </Suspense>

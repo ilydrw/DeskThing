@@ -46,6 +46,15 @@ reported zero vulnerabilities after updating `adm-zip` to 0.6.1, `sharp` to
 0.35.4, and Vitest to 4.1.11. The Vitest update also addresses the previously
 recorded mock-server redirect advisory (GHSA-82fw-gwwq-j7x9).
 
+A fresh full audit on 2026-09-26 also reported zero vulnerabilities.
+
+On 2026-11-11 new advisories had accumulated: 29 findings, 8 of them in
+production dependencies (including DOMPurify, Electron, sharp, and Express).
+`npm audit fix` resolved every production finding; `npm audit --omit=dev` again
+reports zero. Thirteen moderate findings remain in development tooling
+(`electron-builder`, `typedoc`, and `typescript-eslint` dependency chains) and
+need major-version changes to clear.
+
 This supersedes the July dependency snapshot. Re-run both production and full
 audits for every release; a clean audit is not a comprehensive security review.
 
