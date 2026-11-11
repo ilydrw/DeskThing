@@ -289,7 +289,11 @@ export class AppStore implements CacheableStore, AppStoreClass {
     // Wait another tick because it takes two for the UI to load - this is a low priority task
     nextTick(() => {
       void loadAndRunEnabledApps().catch((error) => {
-        Logger.error('Unable to start enabled apps', { source: 'AppStore', function: 'loadApps', error: error as Error })
+        Logger.error('Unable to start enabled apps', {
+          source: 'AppStore',
+          function: 'loadApps',
+          error: error as Error
+        })
       })
     })
   }

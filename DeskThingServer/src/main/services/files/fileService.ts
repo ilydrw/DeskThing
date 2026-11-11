@@ -102,7 +102,9 @@ const serialize = (data: unknown, path: string): string => {
 const writeJson = async (path: string, json: string): Promise<void> => {
   if (unreadable.has(pathKey(path))) {
     throw new FileServiceError(
-      '[writeToFile] Refusing to overwrite unreadable data in ' + path + '; restore access and read it again first'
+      '[writeToFile] Refusing to overwrite unreadable data in ' +
+        path +
+        '; restore access and read it again first'
     )
   }
   const tempPath = path + '.' + randomUUID() + '.tmp'

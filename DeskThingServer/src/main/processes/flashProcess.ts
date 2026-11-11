@@ -75,7 +75,8 @@ export class FlashWorker {
       switch (operation) {
         case 'start':
           this.pushQueue(async () => {
-            if (!this.flashThing || !this.archiveReady) throw new Error('No usable firmware archive is loaded')
+            if (!this.flashThing || !this.archiveReady)
+              throw new Error('No usable firmware archive is loaded')
             await this.flashThing.flash()
             this.sendToParent({ type: 'operation', request: 'complete' })
           })

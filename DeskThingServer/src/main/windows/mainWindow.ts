@@ -134,12 +134,16 @@ export function createMainWindow(): BrowserWindow {
   window.webContents.setWindowOpenHandler((details) => {
     // Handle internal protocol links
     if (details.url.startsWith('deskthing://')) {
-      void handleUrl(details.url).catch((error) => console.error('Failed to handle application link', error))
+      void handleUrl(details.url).catch((error) =>
+        console.error('Failed to handle application link', error)
+      )
       return { action: 'deny' }
     } else {
       // Open external links in default browser
       if (isSafeExternalUrl(details.url)) {
-        void shell.openExternal(details.url).catch((error) => console.error('Failed to open external link', error))
+        void shell
+          .openExternal(details.url)
+          .catch((error) => console.error('Failed to open external link', error))
       }
       return { action: 'deny' }
     }

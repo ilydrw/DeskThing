@@ -35,9 +35,16 @@ export async function initializeAppLifecycle(): Promise<void> {
       await logger.flush()
     }
     const failures = results.filter((result) => result.status === 'rejected')
-    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'Some services failed to stop')
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        'Some services failed to stop'
+      )
   }
-  app.on('before-quit', createBeforeQuitHandler(persistBeforeQuit, () => app.quit()))
+  app.on(
+    'before-quit',
+    createBeforeQuitHandler(persistBeforeQuit, () => app.quit())
+  )
   // Set up protocol handler
   setupProtocolHandler()
 
@@ -100,32 +107,34 @@ export async function initializeAppLifecycle(): Promise<void> {
   // Handle window closure
   app.on('window-all-closed', async () => {
     try {
-    const { storeProvider } = await import('../stores/storeProvider')
-    const settingsStore = await storeProvider.getStore('settingsStore')
-    const settings = await settingsStore.getSettings()
+      const { storeProvider } = await import('../stores/storeProvider')
+      const settingsStore = await storeProvider.getStore('settingsStore')
+      const settings = await settingsStore.getSettings()
 
-    if (settings?.flag_firstClose === true) {
-      let trayIcon: NativeImage
-      if (process.platform === 'darwin') {
-        trayIcon = nativeImage.createFromPath(join(__dirname, '../../resources/iconTrayMacSm.png'))
-      } else {
-        trayIcon = nativeImage.createFromPath(join(__dirname, '../../resources/iconTray.png'))
+      if (settings?.flag_firstClose === true) {
+        let trayIcon: NativeImage
+        if (process.platform === 'darwin') {
+          trayIcon = nativeImage.createFromPath(
+            join(__dirname, '../../resources/iconTrayMacSm.png')
+          )
+        } else {
+          trayIcon = nativeImage.createFromPath(join(__dirname, '../../resources/iconTray.png'))
+        }
+
+        new Notification({
+          title: 'DeskThing is now in the background!',
+          body: 'DeskThing will continue to work.',
+          icon: trayIcon
+        }).show()
+        await settingsStore.saveSetting('flag_firstClose', false)
       }
 
-      new Notification({
-        title: 'DeskThing is now in the background!',
-        body: 'DeskThing will continue to work.',
-        icon: trayIcon
-      }).show()
-      await settingsStore.saveSetting('flag_firstClose', false)
-    }
-
-    if (settings?.server_minimizeApp) {
-      // Device and music services continue running while the UI is hidden.
-      await storeProvider.saveAllToFile()
-    } else {
-      app.quit()
-    }
+      if (settings?.server_minimizeApp) {
+        // Device and music services continue running while the UI is hidden.
+        await storeProvider.saveAllToFile()
+      } else {
+        app.quit()
+      }
     } catch (error) {
       console.error('Failed to handle window closure', error)
     }

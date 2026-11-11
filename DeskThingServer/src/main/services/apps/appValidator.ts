@@ -250,7 +250,8 @@ export const verifyAppInstanceStructure: (
   apps?: unknown | AppData | LegacyAppData
 ) => asserts apps is AppData = (apps) => {
   if (!apps) throw new Error('[verifyAppInstanceStructure] Apps do not exist or is not defined')
-  if (typeof apps != 'object' || Array.isArray(apps)) throw new Error('[verifyAppInstanceStructure] Apps is not an object')
+  if (typeof apps != 'object' || Array.isArray(apps))
+    throw new Error('[verifyAppInstanceStructure] Apps is not an object')
 
   // Only old structures should have apps and config
   if ('apps' in apps && 'config' in apps) {
@@ -285,9 +286,7 @@ export const verifyAppInstanceStructure: (
  * @throws  Error if the app is not a valid AppDataInterface
  * @param app - The app to verify
  */
-export const isValidAppDataInterface: (
-  app: unknown
-) => asserts app is AppDataInterface = (app) => {
+export const isValidAppDataInterface: (app: unknown) => asserts app is AppDataInterface = (app) => {
   if (!app) {
     throw new Error('App data interface is undefined')
   }
@@ -299,7 +298,10 @@ export const isValidAppDataInterface: (
   }
   const value = app as AppDataInterface
   for (const field of ['data', 'settings', 'tasks', 'actions', 'keys'] as const) {
-    if (field in app && (value[field] === null || typeof value[field] !== 'object' || Array.isArray(value[field]))) {
+    if (
+      field in app &&
+      (value[field] === null || typeof value[field] !== 'object' || Array.isArray(value[field]))
+    ) {
       if (value[field] !== undefined) throw new Error(`App ${field} must be an object`)
     }
   }

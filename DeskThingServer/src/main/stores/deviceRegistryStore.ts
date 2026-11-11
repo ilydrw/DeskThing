@@ -17,7 +17,11 @@ const LAST_SEEN_PERSIST_INTERVAL_MS = 5 * 60 * 1000
 const MAX_DEVICE_NAME_LENGTH = 64
 
 const validateRegistryFile = (value: unknown): void => {
-  if (!isRecord(value) || value.version !== DEVICE_REGISTRY_VERSION || !Array.isArray(value.devices)) {
+  if (
+    !isRecord(value) ||
+    value.version !== DEVICE_REGISTRY_VERSION ||
+    !Array.isArray(value.devices)
+  ) {
     throw new Error('Unsupported or invalid known-device registry')
   }
 }
@@ -38,7 +42,9 @@ export class DeviceRegistryStore
 
   async initialize(): Promise<void> {
     if (this._initialized) return
-    this.initialization ??= this.loadDevices().finally(() => { this.initialization = undefined })
+    this.initialization ??= this.loadDevices().finally(() => {
+      this.initialization = undefined
+    })
     await this.initialization
   }
 
@@ -47,9 +53,14 @@ export class DeviceRegistryStore
     try {
       stored = await readFromFile<KnownDeviceFile>(DEVICE_REGISTRY_FILE, validateRegistryFile)
     } catch (error) {
-      logger.error('Unable to read known devices; retaining the original file and using an empty registry for this session', {
-        source: 'deviceRegistryStore', function: 'initialize', error: error as Error
-      })
+      logger.error(
+        'Unable to read known devices; retaining the original file and using an empty registry for this session',
+        {
+          source: 'deviceRegistryStore',
+          function: 'initialize',
+          error: error as Error
+        }
+      )
     }
     if (stored?.version === DEVICE_REGISTRY_VERSION && Array.isArray(stored.devices)) {
       for (const device of stored.devices) {
@@ -138,7 +149,8 @@ export class DeviceRegistryStore
       }
     }
 
-    if (now - (this.lastPersistedSeen.get(device.id) ?? 0) >= LAST_SEEN_PERSIST_INTERVAL_MS) shouldPersist = true
+    if (now - (this.lastPersistedSeen.get(device.id) ?? 0) >= LAST_SEEN_PERSIST_INTERVAL_MS)
+      shouldPersist = true
     device.lastSeenAt = now
 
     this.devices.set(device.id, device)
@@ -220,17 +232,18 @@ export class DeviceRegistryStore
   }
 
   private sanitizeDisplayName(displayName: unknown): string | undefined {
-    const sanitized = typeof displayName === 'string'
-      ? Array.from(displayName)
-          .filter((character) => {
-            const codePoint = character.codePointAt(0) ?? 0
-            return codePoint >= 32 && codePoint !== 127
-          })
-          .join('')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, MAX_DEVICE_NAME_LENGTH)
-      : undefined
+    const sanitized =
+      typeof displayName === 'string'
+        ? Array.from(displayName)
+            .filter((character) => {
+              const codePoint = character.codePointAt(0) ?? 0
+              return codePoint >= 32 && codePoint !== 127
+            })
+            .join('')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, MAX_DEVICE_NAME_LENGTH)
+        : undefined
 
     return sanitized || undefined
   }
@@ -238,11 +251,14 @@ export class DeviceRegistryStore
   private validateStoredDevice(device: unknown): KnownDevice | undefined {
     if (
       !isRecord(device) ||
-      typeof device.id !== 'string' || !device.id.trim() ||
+      typeof device.id !== 'string' ||
+      !device.id.trim() ||
       typeof device.firstSeenAt !== 'number' ||
       typeof device.lastSeenAt !== 'number' ||
-      !Number.isFinite(device.firstSeenAt) || device.firstSeenAt < 0 ||
-      !Number.isFinite(device.lastSeenAt) || device.lastSeenAt < device.firstSeenAt ||
+      !Number.isFinite(device.firstSeenAt) ||
+      device.firstSeenAt < 0 ||
+      !Number.isFinite(device.lastSeenAt) ||
+      device.lastSeenAt < device.firstSeenAt ||
       !isRecord(device.identifiers)
     ) {
       return

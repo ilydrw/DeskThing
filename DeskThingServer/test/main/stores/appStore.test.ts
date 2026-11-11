@@ -83,7 +83,12 @@ describe('AppStore', () => {
       on: vi.fn()
     } as unknown as NotificationStoreClass
 
-    appStore = new AppStore(mockAppProcessStore, mockAuthStore, mockReleaseStore, mockNotificationStore)
+    appStore = new AppStore(
+      mockAppProcessStore,
+      mockAuthStore,
+      mockReleaseStore,
+      mockNotificationStore
+    )
   })
 
   afterEach(() => {

@@ -11,17 +11,30 @@ import { assertReleaseFileMigration } from '../releases/migrationUtils'
 import { isRecord } from '@shared/validation/settings'
 
 const validateReleaseFile = (value: unknown): void => {
-  if (!isRecord(value) || !['0.11.11', '0.11.8', '0.10.0'].includes(String(value.version)) ||
-      !Array.isArray(value.repositories) || !value.repositories.every((repo) => typeof repo === 'string') ||
-      !Array.isArray(value.releases) || !value.releases.every(isRecord) ||
-      typeof value.timestamp !== 'number' || !Number.isFinite(value.timestamp)) {
+  if (
+    !isRecord(value) ||
+    !['0.11.11', '0.11.8', '0.10.0'].includes(String(value.version)) ||
+    !Array.isArray(value.repositories) ||
+    !value.repositories.every((repo) => typeof repo === 'string') ||
+    !Array.isArray(value.releases) ||
+    !value.releases.every(isRecord) ||
+    typeof value.timestamp !== 'number' ||
+    !Number.isFinite(value.timestamp)
+  ) {
     throw new Error('Invalid or unsupported release file')
   }
   if (value.version !== '0.10.0') {
-    if (!['app', 'client'].includes(String(value.type)) || value.releases.some((release) =>
-      typeof release.id !== 'string' || !isRecord(release.mainRelease) ||
-      !isRecord(release.mainRelease[value.type === 'app' ? 'appManifest' : 'clientManifest']) ||
-      !Array.isArray(release.pastReleases))) throw new Error('Invalid cached release')
+    if (
+      !['app', 'client'].includes(String(value.type)) ||
+      value.releases.some(
+        (release) =>
+          typeof release.id !== 'string' ||
+          !isRecord(release.mainRelease) ||
+          !isRecord(release.mainRelease[value.type === 'app' ? 'appManifest' : 'clientManifest']) ||
+          !Array.isArray(release.pastReleases)
+      )
+    )
+      throw new Error('Invalid cached release')
   } else if ('references' in value && !Array.isArray(value.references)) {
     throw new Error('Invalid legacy release references')
   }
@@ -80,7 +93,10 @@ export const readClientReleaseData = async (): Promise<ClientReleaseFile01111 | 
   try {
     const clientReleasePath = join('system', 'clientReleases.json')
 
-    const clientReleaseFile = await readFromFile<ClientReleaseFile>(clientReleasePath, validateReleaseFile)
+    const clientReleaseFile = await readFromFile<ClientReleaseFile>(
+      clientReleasePath,
+      validateReleaseFile
+    )
 
     if (!clientReleaseFile) return undefined
 

@@ -16,7 +16,8 @@ const port = (value: unknown): boolean =>
 const validators: { [K in keyof Required<Settings>]: (value: unknown) => boolean } = {
   version: string,
   server_LogLevel: (value) => Object.values(LOG_FILTER).some((level) => level === value),
-  server_LogContext: (value) => Array.isArray(value) && value.every((context) => Object.values(LOG_CONTEXTS).includes(context)),
+  server_LogContext: (value) =>
+    Array.isArray(value) && value.every((context) => Object.values(LOG_CONTEXTS).includes(context)),
   server_autoStart: boolean,
   server_minimizeApp: boolean,
   server_startMinimized: boolean,
@@ -25,7 +26,11 @@ const validators: { [K in keyof Required<Settings>]: (value: unknown) => boolean
   device_devicePort: port,
   device_address: (value) => typeof value === 'string' && value.trim().length > 0,
   music_playbackLocation: string,
-  music_refreshInterval: (value) => typeof value === 'number' && Number.isFinite(value) && (value < 0 || value >= 100) && value <= 2147483647,
+  music_refreshInterval: (value) =>
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    (value < 0 || value >= 100) &&
+    value <= 2147483647,
   adb_useGlobal: boolean,
   adb_autoConfig: boolean,
   adb_autoDetect: boolean,
@@ -33,13 +38,16 @@ const validators: { [K in keyof Required<Settings>]: (value: unknown) => boolean
   flag_firstClose: boolean,
   flag_hasOpened: boolean,
   flag_collectStats: boolean,
-  privacy_statsConsentVersion: (value) => typeof value === 'number' && Number.isInteger(value) && value >= 0,
+  privacy_statsConsentVersion: (value) =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
   flag_nerd: boolean,
   flag_misc: (value) => isRecord(value) && Object.values(value).every(boolean)
 }
 
-export const isSettingValue = <K extends keyof Settings>(key: K, value: unknown): value is Settings[K] =>
-  Object.hasOwn(validators, key) && validators[key](value)
+export const isSettingValue = <K extends keyof Settings>(
+  key: K,
+  value: unknown
+): value is Settings[K] => Object.hasOwn(validators, key) && validators[key](value)
 
 /** Retain valid preferences from older versions and fill missing/invalid fields independently. */
 export const normalizeSettings = (value: unknown, defaults: Settings): Settings => {

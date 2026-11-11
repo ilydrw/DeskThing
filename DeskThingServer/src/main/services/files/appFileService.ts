@@ -16,12 +16,16 @@ export const setAppData = async (newApp: Partial<App>): Promise<void> => {
   const appName = newApp.name
   assertSafePathSegment(appName, 'App identifier')
   const snapshot = structuredClone(newApp)
-  await updateFile<AppData>(APP_FILE, (current) => {
-    const data = current ?? {}
-    const updated = { ...data[appName], ...snapshot }
-    sanitizeAppStructure(updated)
-    return { ...data, [appName]: updated }
-  }, verifyAppInstanceStructure)
+  await updateFile<AppData>(
+    APP_FILE,
+    (current) => {
+      const data = current ?? {}
+      const updated = { ...data[appName], ...snapshot }
+      sanitizeAppStructure(updated)
+      return { ...data, [appName]: updated }
+    },
+    verifyAppInstanceStructure
+  )
 }
 
 export const setAppsData = async (appsList: App[]): Promise<void> => {
@@ -33,10 +37,14 @@ export const setAppsData = async (appsList: App[]): Promise<void> => {
 export const addAppManifest = async (manifest: AppManifest, appName: string): Promise<void> => {
   assertSafePathSegment(appName, 'App identifier')
   const snapshot = structuredClone(manifest)
-  await updateFile<AppData>(APP_FILE, (data) => {
-    if (!data?.[appName]) throw new Error('Cannot update manifest for missing app ' + appName)
-    return { ...data, [appName]: { ...data[appName], manifest: snapshot } }
-  }, verifyAppInstanceStructure)
+  await updateFile<AppData>(
+    APP_FILE,
+    (data) => {
+      if (!data?.[appName]) throw new Error('Cannot update manifest for missing app ' + appName)
+      return { ...data, [appName]: { ...data[appName], manifest: snapshot } }
+    },
+    verifyAppInstanceStructure
+  )
 }
 
 export const getAppByName = async (appName: string): Promise<App | undefined> => {
@@ -51,7 +59,9 @@ export const deleteAppPath = async (appName: string): Promise<boolean> => {
     return true
   } catch (error) {
     Logger.error('Failed to remove app directory ' + appName, {
-      source: 'AppFileService', function: 'deleteAppPath', error: error as Error
+      source: 'AppFileService',
+      function: 'deleteAppPath',
+      error: error as Error
     })
     return false
   }
@@ -59,9 +69,13 @@ export const deleteAppPath = async (appName: string): Promise<boolean> => {
 
 export const purgeAppConfig = async (appName: string): Promise<void> => {
   assertSafePathSegment(appName, 'App identifier')
-  await updateFile<AppData>(APP_FILE, (data) => {
-    if (!data?.[appName]) throw new Error('App not found: ' + appName)
-    delete data[appName]
-    return data
-  }, verifyAppInstanceStructure)
+  await updateFile<AppData>(
+    APP_FILE,
+    (data) => {
+      if (!data?.[appName]) throw new Error('App not found: ' + appName)
+      delete data[appName]
+      return data
+    },
+    verifyAppInstanceStructure
+  )
 }
